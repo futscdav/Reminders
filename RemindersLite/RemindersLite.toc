@@ -1,0 +1,22 @@
+## Interface: 80000
+## Title: Method Reminders Lite
+## Author: Qoning
+## Version: v1
+## Notes: Is this a note? Is it? I'm not sure.
+## SavedVariables: RemindersLiteDB
+
+## OptionalDeps: Ace3, LibSharedMedia-3.0, AceGUI-3.0-SharedMediaWidgets, AceComm-3.0, AceSerializer-3.0
+
+embeds.xml
+
+#@no-lib-strip@
+libs\AceDBOptions-3.0\AceDBOptions-3.0.xml
+libs\AceGUI-3.0\AceGUI-3.0.xml
+libs\AceGUI-3.0-SharedMediaWidgets\widget.xml
+libs\AceConfig-3.0\AceConfig-3.0.xml
+#@end-no-lib-strip@
+
+RemindersLiteCore.lua
+gui.lua
+
+

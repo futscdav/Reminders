@@ -1,0 +1,60 @@
+Reminder table cheatsheet:
+
+reminder.name = string
+reminder.enabled = boolean
+reminder.category = string
+reminder.subcategory = string
+reminder.trigger = "event" or "bw"
+reminder.active = boolean (needed for cancelling active timers)
+
+reminder.trigger_opt.event = string
+reminder.trigger_opt.check_source = boolean
+reminder.trigger_opt.source_name = string
+reminder.trigger_opt.check_dest = boolean
+reminder.trigger_opt.dest_name = string
+reminder.trigger_opt.check_name = boolean
+reminder.trigger_opt.name = string
+reminder.trigger_opt.include_aura_refresh = boolean
+reminder.trigger_opt.bw_setup = "phase" or "timer"
+reminder.trigger_opt.bw_phase = number
+reminder.trigger_opt.bw_bar_before = number
+reminder.trigger_opt.bw_bar_check_text = boolean
+reminder.trigger_opt.bw_bar_text = string
+reminder.trigger_opt.bw_bar_check_spellid = boolean
+reminder.trigger_opt.bw_bar_spellid = number
+reminder.trigger_opt.difficulty = ~string
+reminder.trigger_opt.boss_hp_unit = string
+reminder.trigger_opt.boss_hp_pct = number
+reminder.trigger_opt.only_load_phase = bool
+reminder.trigger_opt.only_load_phase_num = number
+
+reminder.delay.delay_sec = number
+
+reminder.repeats.setup = string (every_time, only_first, specific)
+reminder.repeats.number = number if specific
+reminder.repeats.offset?
+reminder.repeats.num?
+
+reminder.notification.who = "self" or "everyone" or "specific"
+reminder.notification.message = string
+reminder.notification.sound = number (index of shared media file)
+reminder.notification.specific_list = string
+reminder.notification.duration
+reminder.notification.send = bool
+reminder.notification.check_for_aura = boolean
+reminder.notification.aura_to_check
+
+reminder.volatile.count = times the event fired
+reminder.volatile.procced = boolean for unit health
+
+db structure:
+
+db.reminders
+db.reminders.everywhere
+db.reminders.everywhere.reminders
+
+db.reminders.instance
+db.reminders.instance.reminders
+db.reminders.encounter
+db.reminders.encounter.reminders
+
