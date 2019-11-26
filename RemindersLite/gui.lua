@@ -83,9 +83,11 @@ function gui:ArrangeActiveFontstrings()
     end
 end
 
-function gui:AddMessage(msg, duration)
+function gui:AddMessage(msg, duration, color)
     duration = duration or 2
     local fontstring = self:GetFontstring()
+    local r, g, b, a = unpack(color)
+    fontstring:SetTextColor(r, g, b, a)
     fontstring:SetText(msg)
     self.active_fontstrings = self.active_fontstrings or {}
     self.active_fontstrings[#self.active_fontstrings + 1] = fontstring
@@ -102,7 +104,7 @@ function gui:CreateNotificationFrame()
 
     gui.x_size = 600
     gui.y_size = 150
-    gui.y_string_offset = 30
+    gui.y_string_offset = 35
     gui.y_offset = db.gui_y or -30
     gui.x_offset = db.gui_x or 0
     gui.point = db.gui_point or "CENTER"
@@ -174,7 +176,7 @@ function gui:ShowReminder(reminder)
 
     local SML = SML or LibStub:GetLibrary("LibSharedMedia-3.0")
     -- sound is the index into the table, sadly, so make sure to convert it when sending
-    self:AddMessage(reminder.notification.message, reminder.notification.duration)
+    self:AddMessage(reminder.notification.message, reminder.notification.duration, reminder.notification.color or {1.0, 1.0, 1.0, 1.0})
 
     if reminder.notification.sound then
         local sound_name = reminder.notification.sound

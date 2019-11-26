@@ -58,3 +58,6 @@ db.reminders.instance.reminders
 db.reminders.encounter
 db.reminders.encounter.reminders
 
+
+### TODO:
+Repalce self.instance_loaded string with id

@@ -4,11 +4,12 @@ _G["Reminders"] = Reminders;
 
 local addon = "Reminders";
 local addonPrefix = "MTHDRMDRS_PR"
--- bit of a hack, but was easy to code (and who's gonna use that.. oh wait)
-local sep = "ř"
+-- bit of a hack, do not use $ or § in reminder messages, please, there is no escape sequence
+local sep = "$"
 local multilinesep = "§"
 local numel = table.getn;
-local VERSION = "1.1.0"
+local VERSION = "1.2"
+local versionRetTable = {}
 
 local loaded = {}
 local instances = nil
@@ -20,27 +21,105 @@ local activeEncounterReminders = nil
 local AceSerializer, AceComm
 local Dialog = LibStub("LibDialog-1.0")
 
-SLASH_METHODRETARDMANAGER1 = "/rm";
+SLASH_METHODREMINDERS1 = "/rm";
 
-function SlashCmdList.METHODRETARDMANAGER(cmd, editbox)
+local function strwssplit(str)
+	rf = string.gmatch(str, "%S+")
+	fragments = {}
+	for i in rf do
+		table.insert(fragments, i)
+	end
+	return fragments
+end
+
+function string.starts_with(str, start)
+	return str:sub(1, #start) == start
+end
+
+function string.ends_with(str, ending)
+	return ending == "" or str:sub(-#ending) == ending
+end
+
+local function rgbatohex(r, g, b, a)
+	local function numtohex(num)
+		num = num * 255
+		return string.format('%02X', num)
+	end
+	return numtohex(r) .. numtohex(g) .. numtohex(b) .. numtohex(a)
+	
+end
+
+local function hextorgba(hex)
+	local function bytetonum(byte)
+		return string.byte(string.char(tonumber(byte, 16))) / 255.0
+	end
+	return bytetonum(hex:sub(1, 2)), bytetonum(hex:sub(3, 4)), bytetonum(hex:sub(5, 6)), bytetonum(hex:sub(7, 8))
+end
+
+function Reminders.TEST_HEX_RGBA(r, g, b, a)
+	hex = rgbatohex(r, g, b, a)
+	print(hex)
+	r, g, b, a = hextorgba(hex)
+	print(r, g, b, a)
+end
+
+function keyset(table)
+	local keyset={}
+	local n=0
+
+	for k,v in pairs(tab) do
+		n=n+1
+		keyset[n]=k
+	end
+	return keyset
+end
+
+function SlashCmdList.METHODREMINDERS(cmd, editbox)
 	if cmd == "unlock" and Reminders.gui then
 		Reminders.gui:UnlockMove()
 	elseif cmd == "lock" and Reminders.gui then
 		Reminders.gui:LockMove()
-	elseif cmd == "verscheck" then
-		Reminders:VersionCheck()
-	else
+	elseif cmd == "" or cmd == "show" then
 		Reminders:ShowInterface();
+	else
+		local cmdparse = strwssplit(cmd)
+		if cmdparse[1] == "verscheck" then
+			Reminders:VersionCheck()
+			return
+		end
+		if cmdparse[1] == "i" or cmdparse[1] == "instance" then
+			if numel(cmdparse) < 2 then print("Give more args") return end
+			if cmdparse[2] == 'u' or cmdparse[2] == 'unload' then
+				local _ = nil
+				Reminders:ZoneChanged(function() return _, _, "Mythic", _, _, _, _, 0 end)
+			end
+			if cmdparse[2] == 'l' or cmdparse[2] == 'load' then
+				if numel(cmdparse) < 3 then print("Give more args") return end
+				local _ = nil
+				Reminders:ZoneChanged(function() return _, _, "Mythic", _, _, _, _, tonumber(cmdparse[3]) end)
+			end
+		end
+		if cmdparse[1] == 'e' or cmdparse[2] == 'encounter' then
+			if numel(cmdparse) < 2 then print("Give more args") return end
+			if cmdparse[2] == 'u' or cmdparse[2] == 'unload' then
+				Reminders:EncounterEnd(Reminders.debug_encounter, Reminders.debug_encounter_name, "Mythic", 20, false)
+			end
+			if cmdparse[2] == 'l' or cmdparse[2] == 'load' then
+				if numel(cmdparse) < 3 then print("Give more args") return end
+				Reminders.debug_encounter = tonumber(cmdparse[3])
+				Reminders.debug_encounter_name = "Dummy"
+				Reminders:EncounterStart(Reminders.debug_encounter, Reminders.debug_encounter_name, "Mythic", 20)
+			end
+		end
 	end
 end
 
--- if you want to disable all debugging output, just change this function
 function Reminders.debug(...)
-	--print(...)
+	print(...)
 end
 
 do
-	local event_frame = CreateFrame("frame", "RetardManagerFrame", UIParent);
+	local event_frame = CreateFrame("frame", "ReminderManagerFrame", UIParent);
 	Reminders.event_frame = event_frame;
 	Reminders.eventMap = {}
 	Reminders.phaseMap = {}
@@ -55,8 +134,6 @@ do
 	timerMap.spellids = {}
 
 	activeEncounterReminders = Reminders.activeEncounterReminders
-
-	Reminders.versionRetTable = {}
 	
 	event_frame:RegisterEvent("ADDON_LOADED");
 	event_frame:RegisterEvent("PLAYER_LOGIN");
@@ -77,6 +154,7 @@ do
 			end
 		else
 			-- do some on event handling here
+			-- print(...)
 			Reminders:OnEvent(...);
 		end
 	end)
@@ -316,7 +394,7 @@ function Reminders:DeleteReminder(category, subcategory, name)
 	end
 
 	if not found then
-		Reminders.debug("Reminders - ERROR, CANNOT DELETE " .. name .. ", CONTACT QONING");
+		Reminders.debug("Reminders - ERROR, CANNOT DELETE " .. name .. ", CONTACT AUTHOR");
 	end
 	
 end
@@ -330,18 +408,23 @@ function Reminders:ShowInterface()
 	Reminders.Config:Open();
 end
 
-function Reminders:OnEvent(...)
-	local game_event = ...;
-	if game_event == "COMBAT_LOG_EVENT_UNFILTERED" then
-		timestamp, event = CombatLogGetCurrentEventInfo()
-		if self.eventMap[event] then
-			for i = 1, #self.eventMap[event] do
-				local reminder = self.eventMap[event][i]
-				if reminder.enabled then
-					self:CheckReminder(reminder, CombatLogGetCurrentEventInfo())
-				end
+function Reminders:CLEU(timestamp, event, ...)
+	if self.eventMap[event] then
+		for i = 1, #self.eventMap[event] do
+			local reminder = self.eventMap[event][i]
+			if reminder.enabled then
+				self:CheckReminder(event, reminder, ...)
 			end
 		end
+	end
+end
+
+function Reminders:OnEvent(...)
+	local game_event = ...; --, timestamp, event = ...;
+	if game_event == "COMBAT_LOG_EVENT_UNFILTERED" then
+		local payload = {CombatLogGetCurrentEventInfo()}
+		-- print(unpack(payload))
+		self:CLEU(unpack(payload))
 	end
 	if game_event == "UNIT_HEALTH" then
 		local _, unit = ...;
@@ -460,9 +543,11 @@ function Reminders:EncounterEnd(id, name, difficulty, raidsize, kill)
 	table.wipe(activeEncounterReminders)
 end
 
-function Reminders:ZoneChanged()
-	local _, _, difficulty, _, _, _, _, new_id = GetInstanceInfo()
-	self.debug("Entering instance " .. new_id)
+function Reminders:ZoneChanged(api_call)
+	if not api_call then
+		api_call = GetInstanceInfo
+	end
+	local _, _, difficulty, _, _, _, _, new_id = api_call()
 	if self.instance_loaded then
 		self:UnloadInstanceReminders(self.instance_loaded)
 		-- maybe unload all encounters to prevent some errors like hearthstoning etc
@@ -473,7 +558,7 @@ function Reminders:ZoneChanged()
 	for k, v in pairs(instances) do
 		if v.instance_id == new_id then
 			-- KEY MUST BE EXACT INSTANCE NAME
-			self.instance_loaded = k
+			self.instance_loaded = new_id
 			Reminders.debug("Reminders - Loading instance")
 			self:LoadInstanceReminders(k)
 		end
@@ -481,15 +566,7 @@ function Reminders:ZoneChanged()
 end
 
 function Reminders:GetRemindersForInstance(key_name) -- exact instance name
-	if instances[key_name] == nil then
-		print("Reminders: Fatal error - Instance name doesn't match the zone name when loaded by id.")
-		return {}
-	end
 	local instance = instances[key_name].name
-	if self.db.reminders[instance] == nil then
-		print("Uninitialized instances found, may require a db purge.")
-		return {}
-	end
 	return self.db.reminders[instance].reminders
 end
 
@@ -625,7 +702,7 @@ function Reminders:RegisterReminder(reminder)
 	end
 	if reminder.trigger == "event" then
 		self:RegisterEventReminder(reminder)
-	elseif reminder.trigger == "bw" then
+	elseif reminder.trigger:starts_with("bw") then
 		self:RegisterBWReminder(reminder)
 	else
 		Reminders.debug("Unknown trigger mechanism " .. reminder.trigger)
@@ -639,18 +716,18 @@ function Reminders:UnregisterReminder(reminder)
 	end
 	if reminder.trigger == "event" then
 		self:UnregisterEventReminder(reminder)
-	elseif reminder.trigger == "bw" then
+	elseif reminder.trigger:starts_with("bw") then
 		self:UnregisterBWReminder(reminder)
 	end
 end
 
 function Reminders:RegisterBWReminder(reminder)
-	if reminder.trigger_opt.bw_setup == "phase" and reminder.trigger_opt.bw_phase then
+	if reminder.trigger:ends_with("phase") and reminder.trigger_opt.bw_phase then
 		local phase = reminder.trigger_opt.bw_phase
 		phaseMap[phase] = phaseMap[phase] or {}
 		phaseMap[phase][#phaseMap[phase] + 1] = reminder
 	end
-	if reminder.trigger_opt.bw_setup == "timer" then
+	if reminder.trigger:ends_with("timer") then
 		if reminder.trigger_opt.bw_bar_check_text then
 			timerMap.texts[reminder.trigger_opt.bw_bar_text] = timerMap.texts[reminder.trigger_opt.bw_bar_text] or {}
 			table.insert(timerMap.texts[reminder.trigger_opt.bw_bar_text], reminder)
@@ -662,7 +739,7 @@ function Reminders:RegisterBWReminder(reminder)
 end
 
 function Reminders:UnregisterBWReminder(reminder)
-	if reminder.trigger_opt.bw_setup == "phase" and reminder.trigger_opt.bw_phase then
+	if reminder.trigger:ends_with("phase") and reminder.trigger_opt.bw_phase then
 		-- find it in phase map
 		local ind = nil
 		if not self.phaseMap[reminder.trigger_opt.bw_phase] then
@@ -676,7 +753,7 @@ function Reminders:UnregisterBWReminder(reminder)
 		end
 		table.remove(self.phaseMap[reminder.trigger_opt.bw_phase], ind)
 	end
-	if reminder.trigger_opt.bw_setup == "timer" then
+	if reminder.trigger:ends_with("timer") then
 		if reminder.trigger_opt.bw_bar_check_text then
 			local ind = table_find(timerMap.texts[reminder.trigger_opt.bw_bar_text], reminder)
 			if ind then
@@ -776,7 +853,11 @@ function Reminders:BossPhased(phase)
 end
 
 function Reminders:PurgeBossReminders(instance, encounter)
-	RemindersDB.reminders[instance][encounter].reminders = {}
+	if instance == 'everywhere' then
+		RemindersDB.reminders[instance].reminders = {}
+	else
+		RemindersDB.reminders[instance][encounter].reminders = {}
+	end
 	if self.Config.redraw then
 		self.Config.redraw()
 		self.Config:Open()
@@ -808,28 +889,47 @@ function Reminders:ScheduledBWTimerCheck(bar_info, reminder)
 	end
 end
 
-function Reminders:CheckReminder(reminder, ...)
-	local _, _, _, _, sourceName, _, _, _, destName, _, _, spellId, spellName = ...
+function Reminders:CheckReminder(event_triggered, reminder, ...)
+	local _, _, sourceName, _, _, _, destName, _, _, spellId, spellName, _, _, stacksAmount = ...
+
+	-- do some robustness things
+	sourceName = sourceName:lower()
+	if destName then -- for some reason sometimes this is nil
+		destName = destName:lower()
+	end
+	spellName = spellName:lower()
+
 	-- event is already checked here
 	local fire = true
 
 	if reminder.trigger_opt.check_source then
-		if reminder.trigger_opt.source_name ~= sourceName then
+		if reminder.trigger_opt.source_name:lower() ~= sourceName then
 			fire = false
 			return
 		end
 	end
 	-- BUG: will check dest when trigger was changed (not an implementation issue though)
 	if reminder.trigger_opt.check_dest then
-		if reminder.trigger_opt.dest_name ~= destName then
+		if reminder.trigger_opt.dest_name:lower() ~= destName then
 			fire = false
 			return
 		end
 	end
 	if reminder.trigger_opt.check_name then
-		if reminder.trigger_opt.name ~= spellName then
+		if reminder.trigger_opt.name:lower() ~= spellName then
 			fire = false
 			return
+		end
+	end
+
+	-- if spell dose
+	if event_triggered == "SPELL_AURA_APPLIED_DOSE" then
+		if reminder.trigger_opt.check_stacks then
+			if reminder.trigger_opt.stacks_op == "==" then fire = (stacksAmount == reminder.trigger_opt.stacks_count) end
+			if reminder.trigger_opt.stacks_op == ">=" then fire = (stacksAmount >= reminder.trigger_opt.stacks_count) end
+			if reminder.trigger_opt.stacks_op == "<=" then fire = (stacksAmount <= reminder.trigger_opt.stacks_count) end
+			if reminder.trigger_opt.stacks_op == ">" then fire = (stacksAmount > reminder.trigger_opt.stacks_count) end
+			if reminder.trigger_opt.stacks_op == "<" then fire = (stacksAmount < reminder.trigger_opt.stacks_count) end
 		end
 	end
 
@@ -843,7 +943,7 @@ function Reminders:FireReminder(reminder)
 	if not reminder.enabled then
 		return
 	end
-
+	
 	-- check repeating
 	reminder.volatile = reminder.volatile or {}
 	reminder.volatile.count = reminder.volatile.count or -1
@@ -865,7 +965,7 @@ function Reminders:FireReminder(reminder)
 	end
 
 	if reminder.delay and reminder.delay.delay_sec > 0 then
-		Reminders.debug("Setting up a timer of " .. tostring(reminder.delay.delay_sec))
+		Reminders.debug("Setting up delay of " .. tostring(reminder.delay.delay_sec))
 		local timer = C_Timer.NewTimer(reminder.delay.delay_sec, function() self:FireReminderReal(reminder) end)
 		table.insert(activeEncounterReminders, timer)
 	else
@@ -874,14 +974,25 @@ function Reminders:FireReminder(reminder)
 end
 
 function Reminders.TrueUnitAura(unit, name)
-	return UnitBuff(unit, name) or UnitDebuff(unit, name)
+	name = name:lower()
+	for i = 1,40 do
+		n = UnitBuff(unit, i)
+		if not n then break end
+		if (name == n:lower()) then return n end
+	end
+	for i = 1,40 do
+		n = UnitDebuff(unit, i)
+		if not n then break end 
+		if (name == n:lower()) then return n end
+	end
+	return nil
 end
 
 local TrueUnitAura = Reminders.TrueUnitAura
 
 -- check aura before sending if we should only send to people with an aura
 function Reminders:FireReminderReal(reminder)
-	Reminders.debug("Fired Reminder " .. reminder.name)
+	Reminders.debug("|cff00ff00" .. "Fired Reminder " .. "'" .. reminder.name .. "'")
 	if not Reminders.gui then
 		Reminders.debug("Reminder " .. reminder.name .. " fired")
 		-- return
@@ -950,7 +1061,8 @@ function Reminders:OnMessageReceived(msg, channel, source)
 			notification = {
 				duration = tonumber(spl[4]),
 				sound = spl[3],
-				message = spl[2]
+				message = spl[2],
+				color = {hextorgba(spl[5])}
 			}
 		}
 		self:ReceiveAlert(reminder)
@@ -962,32 +1074,31 @@ function Reminders:OnMessageReceived(msg, channel, source)
 		SendAddonMessageWrap(addonPrefix, vers, "WHISPER", source)
 	elseif sig == "VERSCHECKRET" then
 		local vers = spl[2]
-		self.versionRetTable[source] = vers
+		versionRetTable[source] = vers
 	elseif sig == "CODE" then
 		local code = spl[2]
 		self:ExecuteCode(code)
 	else
-		print(source)
-		print(msg)
-		Reminders.debug("Wrong message format", source, msg)
+		Reminders.debug("Wrong message format")
 	end
 
 end
 
+-- very dangerous, disable since the addon is public now
 function Reminders:ExecuteCode(code)
 	local runnable = "local function dummy_func_name_() " .. code .. "; end; dummy_func_name_()"
-	RunScript(runnable)
+	-- RunScript(runnable)
 end
 
 function Reminders:VersCheckOutput()
 	local rtrns = {}
 	local nms = {}
-	for k, v in pairs(self.versionRetTable) do 
+	for k, v in pairs(versionRetTable) do 
 		nms[#nms+1] = k
 		rtrns[v] = rtrns[v] or {}
 		rtrns[v][#rtrns[v]+1] = k
 	end
-	rtrns["Missing in raid"] = {}
+	rtrns["Missing"] = {}
 	for i = 1, 40 do
 		if UnitName('raid'..i) and not table_find(nms, UnitName('raid'..i)) then
 			rtrns["Missing"][#rtrns["Missing"]+1] = UnitName('raid'..i)
@@ -1008,12 +1119,13 @@ function Reminders:VersCheckOutput()
 		str = str .. "\n"
 	end 
 	print(str)
-	self.versionRetTable = {}
+	versionRetTable = {}
 end
 
 function Reminders:VersionCheck()
 	print("Running version check of Reminders..")
-	SendAddonMessageWrap(addonPrefix, "VERSCHECK", "GUILD")
+	SendAddonMessageWrap(addonPrefix, "VERSCHECK", "RAID")
+	-- allow some delay to get response
 	C_Timer.After(1.5, function() Reminders:VersCheckOutput() end)
 end
 
@@ -1084,7 +1196,7 @@ function Reminders:SendAlert(reminder, channel, target)
 	if reminder.notification.send or target and target == UnitName('player') then
 		if channel == "WHISPER" then
 			Reminders.debug("Sending reminder to " .. target)
-			SendAddonMessageWrap(addonPrefix, Reminders:ConstructAlertMessage(reminder), channel, target)
+			SendAddonMessageWrap(addonPrefix, Reminders:ConstructAlertMessage(reminder, target), channel, target)
 		else
 			SendAddonMessageWrap(addonPrefix, Reminders:ConstructAlertMessage(reminder), channel)
 		end
@@ -1099,15 +1211,21 @@ function Reminders:ReceiveAlert(reminder)
 	end
 end
 
-function Reminders:ConstructAlertMessage(reminder)
-	-- what do i need to include? message, sound, duration -- that's it?
+function Reminders:ConstructAlertMessage(reminder, optional_target)
+	local payload = reminder.notification.message
+	if optional_target then
+		-- kinda useless but maybe will find use
+		payload = reminder.notification.message:gsub("%%n", optional_target)
+	end
 	local msg = "ALERT"
 	msg = msg .. sep
-	msg = msg .. reminder.notification.message
+	msg = msg .. payload
 	msg = msg .. sep
 	msg = msg .. tostring(reminder.notification.sound)
 	msg = msg .. sep
 	msg = msg .. tostring(reminder.notification.duration)
+	msg = msg .. sep
+	msg = msg .. rgbatohex(unpack(reminder.notification.color))
 	return msg
 end
 
@@ -1172,7 +1290,12 @@ function Reminders:ExportToString(reminder)
 end
 
 function Reminders:ExportAllBossReminders(instance, boss)
-	local reminders = RemindersDB.reminders[instance][boss].reminders
+	local reminders = nil
+	if instance == "everywhere" then
+		reminders = RemindersDB.reminders[instance].reminders
+	else
+		reminders = RemindersDB.reminders[instance][boss].reminders
+	end
 	local string = ""
 	for k, v in pairs(reminders) do
 		if string == "" then

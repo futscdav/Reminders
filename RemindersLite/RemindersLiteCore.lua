@@ -5,14 +5,29 @@ _G["RemindersLite"] = Reminders;
 
 local addon = "RemindersLite";
 local addonPrefix = "MTHDRMDRS_PR"
--- bit of a hack, but was easy to code (and who's gonna use that.. oh wait)
-local sep = "ř"
+local sep = "$"
 local numel = table.getn;
-local VERSION = "1.1.0"
+local VERSION = "1.2"
 
-SLASH_METHODRETARDMANAGERLITE1 = "/rm";
+local function rgbatohex(r, g, b, a)
+	local function numtohex(num)
+		num = num * 255
+		return string.format('%02X', num)
+	end
+	return numtohex(r) .. numtohex(g) .. numtohex(b) .. numtohex(a)
+	
+end
 
-function SlashCmdList.METHODRETARDMANAGERLITE(cmd, editbox)
+local function hextorgba(hex)
+	local function bytetonum(byte)
+		return string.byte(string.char(tonumber(byte, 16))) / 255.0
+	end
+	return bytetonum(hex:sub(1, 2)), bytetonum(hex:sub(3, 4)), bytetonum(hex:sub(5, 6)), bytetonum(hex:sub(7, 8))
+end
+
+SLASH_METHODREMINDERS1 = "/rm";
+
+function SlashCmdList.METHODREMINDERS1(cmd, editbox)
 	if cmd == "unlock" and Reminders.gui then
 		Reminders.gui:UnlockMove()
 	elseif cmd == "lock" and Reminders.gui then
@@ -25,7 +40,7 @@ local loaded = {}
 local AceSerializer, AceComm
 
 do
-	local event_frame = CreateFrame("frame", "RetardManagerFrame", UIParent);
+	local event_frame = CreateFrame("frame", "ReminderManagerFrame", UIParent);
 	Reminders.event_frame = event_frame;
 
 
@@ -139,13 +154,14 @@ function Reminders:OnMessageReceived(msg, channel, source)
 			notification = {
 				duration = tonumber(spl[4]),
 				sound = spl[3],
-				message = spl[2]
+				message = spl[2],
+				color = {hextorgba(spl[5])}
 			}
 		}
 		self:ReceiveAlert(reminder)
 	elseif sig == "REMINDER" then
-		local serialized = string.sub(msg, string.len("REMINDER") + string.len(sep) + 1)
-		self:ReceiveReminder(serialized)
+		-- only in full version
+		-- self:ReceiveReminder(serialized)
 	elseif sig == "VERSCHECK" then
 		local vers = "VERSCHECKRET" .. sep .. VERSION
 		SendAddonMessageWrap(addonPrefix, vers, "WHISPER", source)
@@ -158,9 +174,10 @@ function Reminders:OnMessageReceived(msg, channel, source)
 
 end
 
+-- disable since code is public
 function Reminders:ExecuteCode(code)
 	local runnable = "local function dummy_func_name_() " .. code .. "; end; dummy_func_name_()"
-	RunScript(runnable)
+	-- RunScript(runnable)
 end
 
 function Reminders:ReceiveAlert(reminder)
