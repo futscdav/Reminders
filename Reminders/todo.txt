@@ -2,7 +2,7 @@ Reminder table cheatsheet:
 
 reminder.name = string
 reminder.enabled = boolean
-reminder.category = string
+reminder.category = id
 reminder.subcategory = string
 reminder.trigger = "event" or "bw"
 reminder.active = boolean (needed for cancelling active timers)

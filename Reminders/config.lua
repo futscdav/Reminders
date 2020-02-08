@@ -17,7 +17,6 @@ local function dump_table_chat(table, varname)
 	DevTools_DumpCommand("TESTVAR_"..varname)
 end
 
-
 local function make_padding(order, width)
 	local padding = {
 		type = "description",
@@ -334,18 +333,28 @@ local function inject_event_trigger_settings(reminder, base_table, child_name, o
 end
 
 local function inject_bw_timer_trigger_settings(reminder, base_table, child_name, order)
+	local function make_phase_only_header()
+		return make_header("Phase only", order + 0.55)
+	end
+	local function make_phase_only_toggle()
+		return {
+			type = "toggle",
+			name = "Only load in phase (BW)",
+			order = order + 0.95,
+			get = function(info) return reminder.trigger_opt.only_load_phase end,
+			set = function(info, value) reminder.trigger_opt.only_load_phase = value end,
+		}
+	end
+	local function make_phase_only_input()
+		return {
+			type = "input",
+			name = "",--"Phase",
+			order = order + 0.96,
+			get = function(info) return tostring(reminder.trigger_opt.only_load_phase_num or "") end,
+			set = function(info, value) reminder.trigger_opt.only_load_phase_num = tonumber(value) end,
+		}
+	end
 	base_table[child_name].plugins["trigger"] = {
-		-- header = make_header("BigWigs ", order + 0.01),
-		-- timer_status = {
-		-- 	type = "toggle",
-		-- 	name = "Timer",
-		-- 	--disabled = true,
-		-- 	order = order + 0.02,
-		-- 	get = function(info) return reminder.trigger_opt.bw_setup == "timer" end,
-		-- 	set = function(info, value) reminder.trigger_opt.bw_setup = "timer";
-		-- 								inject_bw_trigger_opt_settings(reminder, base_table[child_name].args["trigger_settings"]);
-		-- 								Reminders:ReminderTriggerChanged(reminder, "bw");  end,
-		-- },
 		check_text = {
 			type = "toggle",
 			name = "Check Text",
@@ -380,7 +389,10 @@ local function inject_bw_timer_trigger_settings(reminder, base_table, child_name
 			order = order + 0.06,
 			get = function(info) return tostring(reminder.trigger_opt.bw_bar_before or "") end,
 			set = function(info, value) reminder.trigger_opt.bw_bar_before = tonumber(value) end,
-		}
+		},
+		make_phase_only_header(),
+		make_phase_only_toggle(),
+		make_phase_only_input(),
 	}
 end
 
@@ -736,6 +748,8 @@ local function create_empty(info, name)
 	reminder.repeats = {}
 	reminder.repeats.setup = "every_time"
 	reminder.repeats.number = 1
+	reminder.repeats.offset = 0
+	reminder.repeats.modulo = 1
 
 	reminder.notification = {}
 	reminder.notification.who = "self"
@@ -953,9 +967,14 @@ local function load_shared_media()
 	sound_values = SML:List(SML.MediaType.SOUND)
 	if WeakAuras and WeakAuras.sound_types then
 		for k, v in pairs(WeakAuras.sound_types) do
-			sound_values[#sound_values+1] = v
+			local isin = false
+			for _, sv in pairs(sound_values) do if sv == v then isin = true end end
+			if not isin and v ~= " Custom" and v ~= " Sound by Kit ID" then
+				sound_values[#sound_values+1] = v
+			end
 		end
 	end
+
 end
 
 local function load_db_if_needed()

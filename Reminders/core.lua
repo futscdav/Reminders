@@ -115,7 +115,7 @@ function SlashCmdList.METHODREMINDERS(cmd, editbox)
 end
 
 function Reminders.debug(...)
-	print(...)
+	-- print(...)
 end
 
 do
@@ -557,7 +557,7 @@ function Reminders:ZoneChanged(api_call)
 
 	for k, v in pairs(instances) do
 		if v.instance_id == new_id then
-			-- KEY MUST BE EXACT INSTANCE NAME
+			-- Key is now instance zone id
 			self.instance_loaded = new_id
 			Reminders.debug("Reminders - Loading instance")
 			self:LoadInstanceReminders(k)
@@ -835,6 +835,10 @@ end
 function Reminders:BossPhased(phase)
 	local instance = self.instance_loaded
 	local encounter = self.encounter_loaded
+	
+	if not instance or not encounter then
+		return
+	end
 	Reminders.debug(instance, encounter, "boss phased into", phase)
 
 	if self.phaseMap then
@@ -872,12 +876,20 @@ function Reminders:BWTimerStart(bar_info)
 	--Reminders.debug("Timer", bar_info.text, bar_info.spellId, "started")
 	if timerMap.texts and timerMap.texts[bar_info.text] then
 		for k, v in pairs(timerMap.texts[bar_info.text]) do
-			C_Timer.After(bar_info.duration - v.trigger_opt.bw_bar_before, function() Reminders:ScheduledBWTimerCheck(bar_info, v) end)
+			if (bar_info.duration - v.trigger_opt.bw_bar_before) < 0 then
+				print("Error: BigWigs_bar_before > timer duration=", bar_info.text, v.name)
+			else
+				C_Timer.After(bar_info.duration - v.trigger_opt.bw_bar_before, function() Reminders:ScheduledBWTimerCheck(bar_info, v) end)
+			end
 		end
 	end
 	if timerMap.spellids and timerMap.spellids[bar_info.spellId] then
 		for k, v in pairs(timerMap.spellids[bar_info.spellId]) do
-			C_Timer.After(bar_info.duration - v.trigger_opt.bw_bar_before, function() Reminders:ScheduledBWTimerCheck(bar_info, v) end)
+			if (bar_info.duration - v.trigger_opt.bw_bar_before) < 0 then
+				print("BigWigs_bar_before > timer duration=", bar_info.spellId, v.name)
+			else
+				C_Timer.After(bar_info.duration - v.trigger_opt.bw_bar_before, function() Reminders:ScheduledBWTimerCheck(bar_info, v) end)
+			end
 		end
 	end
 end
@@ -893,8 +905,10 @@ function Reminders:CheckReminder(event_triggered, reminder, ...)
 	local _, _, sourceName, _, _, _, destName, _, _, spellId, spellName, _, _, stacksAmount = ...
 
 	-- do some robustness things
-	sourceName = sourceName:lower()
-	if destName then -- for some reason sometimes this is nil
+	if sourceName then -- some spells also have no source (world buffs etc)
+		sourceName = sourceName:lower() 
+	end
+	if destName then -- some spells clearly have no target (aoe etc)
 		destName = destName:lower()
 	end
 	spellName = spellName:lower()
@@ -941,6 +955,7 @@ end
 -- handle delaying here
 function Reminders:FireReminder(reminder)
 	if not reminder.enabled then
+		-- last chance to catch the disabled reminder
 		return
 	end
 	
@@ -960,6 +975,7 @@ function Reminders:FireReminder(reminder)
 
 	local offset = reminder.repeats.offset or 0
 	local modulo = reminder.repeats.modulo or 1
+	if modulo < 1 then modulo = 1 end
 	if reminder.repeats.setup == "repeat_every" and (reminder.volatile.count < offset or mod(reminder.volatile.count - offset, modulo) ~= 0) then
 		return
 	end
@@ -1148,7 +1164,7 @@ function Reminders:SendReminderToTarget(reminder)
 		print("No target selected.")
 		return
 	end
-	print("Sending")
+	print("Sending to " .. target)
 	local serializedString = self:SerializeReminder(reminder)
 	SendAddonMessageWrap(addonPrefix, serializedString, "WHISPER", target)
 end
@@ -1225,7 +1241,7 @@ function Reminders:ConstructAlertMessage(reminder, optional_target)
 	msg = msg .. sep
 	msg = msg .. tostring(reminder.notification.duration)
 	msg = msg .. sep
-	msg = msg .. rgbatohex(unpack(reminder.notification.color))
+	msg = msg .. rgbatohex(unpack(reminder.notification.color or {1.0, 1.0, 1.0, 1.0}))
 	return msg
 end
 
@@ -1253,11 +1269,11 @@ function Reminders:AddOrOverwrite(table, reminder)
 		end
 	end
 	if not exists then
-		print("Adding a new reminder")
+		print("Adding a new reminder -", reminder.name, "(", reminder.subcategory, ")")
 		table[#table + 1] = reminder
 	else
 		self:UnregisterReminder(table[index])
-		print("Overwriting an old reminder")
+		print("Overwriting an existing reminder -", reminder.name, "(", reminder.subcategory, ")")
 		table[index] = reminder
 	end
 end
@@ -1301,7 +1317,7 @@ function Reminders:ExportAllBossReminders(instance, boss)
 		if string == "" then
 			string = string .. self:SerializeReminder(v)
 		else
-			string = string .. "\n" .. multilinesep .. self:SerializeReminder(v)
+			string = string .. multilinesep .. self:SerializeReminder(v) -- .. "\n"
 		end
 	end
 	Dialog:Register("RemindersStringExportAll", {
@@ -1448,12 +1464,20 @@ function Reminders:PlaySound(name)
 	print("Warning - Sound '" .. name .. "' not found.")
 end
 
-function Reminders:nm()
-	useframe = nil
-	for _, frame in pairs(C_NamePlate.GetNamePlates(true)) do
-		print(frame)
-		useframe = frame
-		GLOBAL_A = frame
-	end
-	dump_table_chat(useframe, 'dummy')
+function Reminders:SoundIndexToName(index)
+    local SML = SML or LibStub:GetLibrary("LibSharedMedia-3.0")
+    local sound_name = SML:List(SML.MediaType.SOUND)[index]
+    if not sound_name then return "None" end
+    return sound_name
+end
+
+function Reminders:SoundNameToIndex(name)
+    local SML = SML or LibStub:GetLibrary("LibSharedMedia-3.0")
+    for k, v in pairs(SML:List(SML.MediaType.SOUND)) do
+        if v == name then
+            return k
+        end
+    end
+    print("Sound index not found.")
+    return 0
 end

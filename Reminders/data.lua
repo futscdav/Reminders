@@ -139,21 +139,3 @@ local instances = {
 }
 
 Reminders.instances = instances;
-
-function Reminders:SoundIndexToName(index)
-    local SML = SML or LibStub:GetLibrary("LibSharedMedia-3.0")
-    local sound_name = SML:List(SML.MediaType.SOUND)[index]
-    if not sound_name then return "None" end
-    return sound_name
-end
-
-function Reminders:SoundNameToIndex(name)
-    local SML = SML or LibStub:GetLibrary("LibSharedMedia-3.0")
-    for k, v in pairs(SML:List(SML.MediaType.SOUND)) do
-        if v == name then
-            return k
-        end
-    end
-    print("Sound index not found.")
-    return 0
-end
