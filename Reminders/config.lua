@@ -364,7 +364,7 @@ local function inject_bw_timer_trigger_settings(reminder, base_table, child_name
 		},
 		timer_text = {
 			type = "input",
-			name = "Bar Text (exact)",
+			name = "Bar Text (contains)",
 			order = order + 0.03,
 			get = function(info) return reminder.trigger_opt.bw_bar_text or "" end,
 			set = function(info, value) reminder.trigger_opt.bw_bar_text = (value) end

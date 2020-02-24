@@ -872,12 +872,22 @@ function Reminders:BWTimerStop(bar_info)
 	--Reminders.debug("Timer", bar_info.text, "stopped")
 end
 
+function Reminders:FindActiveBarRemindersContainingText(bartext)
+	local found = {}
+	for text, reminder_list in pairs(timerMap.texts) do
+		if string.match(bartext:lower(), text:lower()) then
+			for k, v in pairs(reminder_list) do table.insert(found, v) end
+		end
+	end
+	return found
+end
+
 function Reminders:BWTimerStart(bar_info)
 	--Reminders.debug("Timer", bar_info.text, bar_info.spellId, "started")
-	if timerMap.texts and timerMap.texts[bar_info.text] then
-		for k, v in pairs(timerMap.texts[bar_info.text]) do
+	if timerMap.texts then
+		for k, v in pairs(self:FindActiveBarRemindersContainingText(bar_info.text)) do
 			if (bar_info.duration - v.trigger_opt.bw_bar_before) < 0 then
-				print("Error: BigWigs_bar_before > timer duration=", bar_info.text, v.name)
+				print(v.name, "Error: Requested reminder to fire", v.trigger_opt.bw_bar_before, "sec before timer, but timer is only", bar_info.duration, "long, ignoring..", bar_info.text)
 			else
 				C_Timer.After(bar_info.duration - v.trigger_opt.bw_bar_before, function() Reminders:ScheduledBWTimerCheck(bar_info, v) end)
 			end
@@ -886,7 +896,7 @@ function Reminders:BWTimerStart(bar_info)
 	if timerMap.spellids and timerMap.spellids[bar_info.spellId] then
 		for k, v in pairs(timerMap.spellids[bar_info.spellId]) do
 			if (bar_info.duration - v.trigger_opt.bw_bar_before) < 0 then
-				print("BigWigs_bar_before > timer duration=", bar_info.spellId, v.name)
+				print(v.name, "Error: Requested reminder to fire", v.trigger_opt.bw_bar_before, "sec before timer, but timer is only", bar_info.duration, "long, ignoring..", bar_info.spellId)
 			else
 				C_Timer.After(bar_info.duration - v.trigger_opt.bw_bar_before, function() Reminders:ScheduledBWTimerCheck(bar_info, v) end)
 			end
@@ -1171,6 +1181,19 @@ end
 
 function Reminders:SendReminder(reminder, channel)
 	-- NYI
+	print("Unused function..")
+end
+
+function Reminders:FindCategoryForSubcategory(subcategory)
+	for _, raid in pairs(self.instances) do
+		for _, encounter in pairs(raid.encounters) do
+			if encounter.name:lower() == subcategory:lower() then
+				return raid.name, encounter.name
+			end
+		end
+	end
+	print("Encounter name of reminder import is wrong, raid for", subcategory, "not found.")
+	return nil, nil
 end
 
 function Reminders:ReceiveReminder(serializedString)
@@ -1188,14 +1211,19 @@ function Reminders:ReceiveReminder(serializedString)
 		print("AceSerializer is not installed")
 		return
 	end
-	--print(string.len(serializedString))
 	local success, reminder = AceSerializer:Deserialize(serializedString)
 	if not success then
 		print(reminder)
 		return
 	end
 	-- dump_table_chat(reminder, "RECEIVED_REMINDER")
-	-- insert it into db??
+	-- check if category needs to be autofilled
+	if reminder.category == nil or reminder.category == "" then
+		reminder.category, reminder.subcategory = self:FindCategoryForSubcategory(reminder.subcategory)
+		if reminder.category == nil then return end
+	end
+
+	-- insert it into db
 	self:AddReminder(reminder)
 	-- redraw config if it was loaded already
 	if self.Config.redraw then

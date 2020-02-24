@@ -63,73 +63,73 @@ local instances = {
         name = "Nya'lotha",
         encounters = {
             wrathion = { -- OK
-				encounter_id = 2368,
+				--encounter_id = 2368,
 				engage_id = 2329,
 				name = "Wrathion",
 				order = 12
 			},
             maut = { -- OK
-				encounter_id = 2365,
+				--encounter_id = 2365,
 				engage_id = 2327,
 				name = "Maut",
 				order = 11
             },
             skitra = { -- OK
-				encounter_id = 2369,
+				--encounter_id = 2369,
 				engage_id = 2334,
 				name = "Skitra",
 				order = 10
 			},
             xanesh = { -- OK
-				encounter_id = 2377,
+				--encounter_id = 2377,
 				engage_id = 2328,
 				name = "Xanesh",
 				order = 9
 			},
             hivemind = { -- OK
-				encounter_id = 2372,
+				--encounter_id = 2372,
 				engage_id = 2333,
 				name = "Hivemind",
 				order = 8
 			},
             shadhar = { -- OK
-				encounter_id = 2367,
+				--encounter_id = 2367,
 				engage_id = 2335,
 				name = "Shad'har",
 				order = 7
 			},
             drestagath = { -- OK
-				encounter_id = 2373,
+				--encounter_id = 2373,
 				engage_id = 2343,
 				name = "Drest'agath",
 				order = 6
             },
             vexiona = { -- OK
-				encounter_id = 2370,
+				--encounter_id = 2370,
 				engage_id = 2336,
 				name = "Vexiona",
 				order = 5 -- Forgot this boss
             },
             raden = { -- OK
-				encounter_id = 2364,
+				--encounter_id = 2364,
 				engage_id = 2331,
 				name = "Ra-den",
 				order = 4
 			},
             ilgy = { -- OK
-				encounter_id = 2374,
+				--encounter_id = 2374,
 				engage_id = 2345,
 				name = "Il'gynoth",
 				order = 3
 			},
             carapace = { -- OK
-				encounter_id = 2366,
+				--encounter_id = 2366,
 				engage_id = 2337,
 				name = "Carapace",
 				order = 2
 			},
             nzoth = { -- OK
-				encounter_id = 2375,
+				--encounter_id = 2375,
 				engage_id = 2344,
 				name = "N'Zoth",
 				order = 1
