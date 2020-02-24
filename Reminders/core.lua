@@ -8,7 +8,7 @@ local addonPrefix = "MTHDRMDRS_PR"
 local sep = "$"
 local multilinesep = "§"
 local numel = table.getn;
-local VERSION = "1.2"
+local VERSION = "1.3"
 local versionRetTable = {}
 
 local loaded = {}
