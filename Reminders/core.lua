@@ -16,7 +16,7 @@ local instances = nil
 local phaseMap = nil
 local timerMap = nil
 local eventMap = nil
-local activeEncounterReminders = nil
+local activeEncounterReminders = nil -- active timers
 
 local AceSerializer, AceComm
 local Dialog = LibStub("LibDialog-1.0")
@@ -729,6 +729,7 @@ function Reminders:RegisterBWReminder(reminder)
 	end
 	if reminder.trigger:ends_with("timer") then
 		if reminder.trigger_opt.bw_bar_check_text then
+			Reminders.debug("Registering timer, text=" .. reminder.trigger_opt.bw_bar_text)
 			timerMap.texts[reminder.trigger_opt.bw_bar_text] = timerMap.texts[reminder.trigger_opt.bw_bar_text] or {}
 			table.insert(timerMap.texts[reminder.trigger_opt.bw_bar_text], reminder)
 		elseif reminder.trigger_opt.bw_bar_check_spellid then
@@ -875,7 +876,9 @@ end
 function Reminders:FindActiveBarRemindersContainingText(bartext)
 	local found = {}
 	for text, reminder_list in pairs(timerMap.texts) do
-		if string.match(bartext:lower(), text:lower()) then
+		-- this is regex matching
+		-- if string.match(bartext:lower(), text:lower()) then
+		if string.find(bartext:lower(), text:lower(), nil, true) then
 			for k, v in pairs(reminder_list) do table.insert(found, v) end
 		end
 	end
@@ -886,6 +889,7 @@ function Reminders:BWTimerStart(bar_info)
 	--Reminders.debug("Timer", bar_info.text, bar_info.spellId, "started")
 	if timerMap.texts then
 		for k, v in pairs(self:FindActiveBarRemindersContainingText(bar_info.text)) do
+			if v.trigger_opt.bw_bar_before == nil then v.trigger_opt.bw_bar_before = 0 end
 			if (bar_info.duration - v.trigger_opt.bw_bar_before) < 0 then
 				print(v.name, "Error: Requested reminder to fire", v.trigger_opt.bw_bar_before, "sec before timer, but timer is only", bar_info.duration, "long, ignoring..", bar_info.text)
 			else
@@ -895,6 +899,7 @@ function Reminders:BWTimerStart(bar_info)
 	end
 	if timerMap.spellids and timerMap.spellids[bar_info.spellId] then
 		for k, v in pairs(timerMap.spellids[bar_info.spellId]) do
+			if v.trigger_opt.bw_bar_before == nil then v.trigger_opt.bw_bar_before = 0 end
 			if (bar_info.duration - v.trigger_opt.bw_bar_before) < 0 then
 				print(v.name, "Error: Requested reminder to fire", v.trigger_opt.bw_bar_before, "sec before timer, but timer is only", bar_info.duration, "long, ignoring..", bar_info.spellId)
 			else
@@ -1019,6 +1024,9 @@ local TrueUnitAura = Reminders.TrueUnitAura
 -- check aura before sending if we should only send to people with an aura
 function Reminders:FireReminderReal(reminder)
 	Reminders.debug("|cff00ff00" .. "Fired Reminder " .. "'" .. reminder.name .. "'")
+	if reminder.notification.check_for_aura then
+		Reminders.debug("Checking for aura..", reminder.notification.aura_to_check)
+	end
 	if not Reminders.gui then
 		Reminders.debug("Reminder " .. reminder.name .. " fired")
 		-- return
