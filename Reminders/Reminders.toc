@@ -1,7 +1,7 @@
-## Interface: 80205
-## Title: Method Reminders
+## Interface: 90002
+## Title: Reminders
 ## Author: Qoning
-## Version: v2
+## Version: v1.7
 ## Notes: 
 ## SavedVariables: RemindersDB
 
@@ -14,6 +14,7 @@ libs\AceDBOptions-3.0\AceDBOptions-3.0.xml
 libs\AceGUI-3.0\AceGUI-3.0.xml
 libs\AceGUI-3.0-SharedMediaWidgets\widget.xml
 libs\AceConfig-3.0\AceConfig-3.0.xml
+libs\LibDeflate\lib.xml
 #@end-no-lib-strip@
 
 core.lua

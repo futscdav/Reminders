@@ -9,7 +9,7 @@ local insert = table.insert;
 Reminders.Config = Config
 -- set when config is open
 local db = nil
-local addon_name_ref = "Method Reminders"
+local addon_name_ref = "Echo Reminders"
 
 local function dump_table_chat(table, varname)
 	_G["TESTVAR_"..varname] = table;
@@ -44,6 +44,7 @@ local event_trigger_value_options = {
 	SPELL_CAST_START = "SPELL_CAST_START",
 	SPELL_CAST_SUCCESS = "SPELL_CAST_SUCCESS",
 	SPELL_AURA_APPLIED = "SPELL_AURA_APPLIED",
+	SPELL_AURA_REMOVED = "SPELL_AURA_REMOVED",
 	ENCOUNTER_START = "ENCOUNTER_START",
 	UNIT_HEALTH = "UNIT_HEALTH",
 	SPELL_AURA_APPLIED_DOSE = "SPELL_AURA_APPLIED_DOSE",
@@ -90,7 +91,7 @@ local function inject_specific_people_input(reminder, base_table)
 		base_table.plugins["notify_plugin"] = {
 			input = {
 				type = "input",
-				name = "People list",
+				name = "Specific Names List",
 				desc = "List people to notify, separated by comma",
 				order = 99,
 				width = "double",
@@ -253,6 +254,17 @@ local function inject_event_trigger_settings(reminder, base_table, child_name, o
 			make_phase_only_toggle(),
 			make_phase_only_input(),
 		},
+		["SPELL_AURA_REMOVED"] = {
+			make_check_source(order + 0.21),
+			make_source_input(order + 0.22),
+			make_name_toggle(order + 0.23),
+			make_name_input(order + 0.24),
+			make_dest_toggle(order + 0.25),
+			make_dest_input(order + 0.26),
+			make_phase_only_header(),
+			make_phase_only_toggle(),
+			make_phase_only_input(),
+		},
 		["SPELL_AURA_APPLIED_DOSE"] = {
 			make_check_source(order + 0.21),
 			make_source_input(order + 0.22),
@@ -367,7 +379,9 @@ local function inject_bw_timer_trigger_settings(reminder, base_table, child_name
 			name = "Bar Text (contains)",
 			order = order + 0.03,
 			get = function(info) return reminder.trigger_opt.bw_bar_text or "" end,
-			set = function(info, value) reminder.trigger_opt.bw_bar_text = (value) end
+			set = function(info, value) reminder.trigger_opt.bw_bar_text = (value) 
+						if reminder.category == "everywhere" then Reminders:ReminderTriggerChanged(reminder, reminder.trigger) end 
+				  end
 		},
 		check_spellid = {
 			type = "toggle",
@@ -381,7 +395,9 @@ local function inject_bw_timer_trigger_settings(reminder, base_table, child_name
 			name = "",--"Spell Id",
 			order = order + 0.05,
 			get = function(info) return tostring(reminder.trigger_opt.bw_bar_spellid or "") end,
-			set = function(info, value) reminder.trigger_opt.bw_bar_spellid = tonumber(value) end,
+			set = function(info, value) reminder.trigger_opt.bw_bar_spellid = tonumber(value) 
+				if reminder.category == "everywhere" then Reminders:ReminderTriggerChanged(reminder, reminder.trigger) end
+			end,
 		},
 		before = {
 			type = "input",
@@ -633,14 +649,6 @@ local function create_tab_content_reminder(reminder)
 							}
 						},
 						args = {
-							-- send = {
-							-- 	type = "toggle",
-							-- 	name = "Only Local",
-							-- 	desc = "If this is checked, no notification will be sent, it will only fire if this happens to you.",
-							-- 	order = 0.5,
-							-- 	get = function(info) return reminder.notification.send == false end,
-							-- 	set = function(info, value) reminder.notification.send = not value end,
-							-- },
 							only_self = {
 								type = "toggle",
 								name = "Only Me",
@@ -648,7 +656,8 @@ local function create_tab_content_reminder(reminder)
 								get = function(info) return reminder.notification.who == "self" end,
 								set = function(info, value) 
 										reminder.notification.who = "self"; 
-										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings); 
+										reminder.notification.echointernal = {};
+										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings);
 									  end,
 							},
 							everyone = {
@@ -657,7 +666,8 @@ local function create_tab_content_reminder(reminder)
 								order = 2,
 								get = function(info) return reminder.notification.who == "everyone" end,
 								set = function(info, value) 
-										reminder.notification.who = "everyone"; 
+										reminder.notification.who = "everyone";
+										reminder.notification.echointernal = {};
 										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings); 
 									  end,
 							},
@@ -667,11 +677,72 @@ local function create_tab_content_reminder(reminder)
 								order = 3,
 								get = function(info) return reminder.notification.who == "specific" end,
 								set = function(info, value) 
-										reminder.notification.who = "specific"; 
+										reminder.notification.who = "specific";
+										reminder.notification.echointernal = {};
 										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings); 
 									  end, -- and read + save specific
 							},
-
+							padding0 = make_padding(3.5, "double"),
+							padding1 = make_padding(3.6, "double"),
+							echointernal_melee = {
+								type = "toggle",
+								name = "EchoInternal_Melee",
+								order = 4,
+								get = function(info) return reminder.notification.who == "echointernal" and reminder.notification.echointernal.melee end,
+								set = function(info, value) 
+										reminder.notification.who = "echointernal"
+										reminder.notification.echointernal = reminder.notification.echointernal or {}
+										reminder.notification.echointernal.melee = value;
+										local ei = reminder.notification.echointernal;
+										if not ei.melee and not ei.ranged and not ei.tanks and not ei.healers then reminder.notification.who = "self" end
+										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings); 
+									end
+							},
+							echointernal_ranged = {
+								type = "toggle",
+								name = "EchoInternal_Ranged",
+								order = 5,
+								get = function(info) return reminder.notification.who == "echointernal" and reminder.notification.echointernal.ranged end,
+								set = function(info, value) 
+										reminder.notification.who = "echointernal"
+										reminder.notification.echointernal = reminder.notification.echointernal or {}
+										reminder.notification.echointernal.ranged = value;
+										local ei = reminder.notification.echointernal;
+										if not ei.melee and not ei.ranged and not ei.tanks and not ei.healers then reminder.notification.who = "self" end
+										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings); 
+									end
+							},
+							echointernal_tanks = {
+								type = "toggle",
+								name = "EchoInternal_Tanks",
+								order = 6,
+								get = function(info) return reminder.notification.who == "echointernal" and reminder.notification.echointernal.tanks end,
+								set = function(info, value) 
+										reminder.notification.who = "echointernal"
+										reminder.notification.echointernal = reminder.notification.echointernal or {}
+										reminder.notification.echointernal.tanks = value;
+										local ei = reminder.notification.echointernal;
+										if not ei.melee and not ei.ranged and not ei.tanks and not ei.healers then reminder.notification.who = "self" end
+										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings); 
+									end
+							},
+							echointernal_healers = {
+								type = "toggle",
+								name = "EchoInternal_Healers",
+								order = 7,
+								get = function(info) return reminder.notification.who == "echointernal" and reminder.notification.echointernal.healers end,
+								set = function(info, value) 
+										reminder.notification.who = "echointernal"
+										reminder.notification.echointernal = reminder.notification.echointernal or {}
+										reminder.notification.echointernal.healers = value;
+										local ei = reminder.notification.echointernal;
+										if not ei.melee and not ei.ranged and not ei.tanks and not ei.healers then reminder.notification.who = "self" end
+										inject_specific_people_input(reminder, self_ref_tab.self_ref.args.display_tab.args.notify_settings); 
+									end
+							},
+							padding2 = make_padding(7.5, "normal"),
+							padding3 = make_padding(7.6, "normal"),
+							padding4 = make_padding(7.7, "normal"),
 						}
 					},
 					make_header("Message", 5),
@@ -763,18 +834,19 @@ local function create_empty(info, name)
 	local instance = info[1]
 	local encounter = info[2]
 
-	if encounter == "everywhere" or encounter == "trash" then
-		insert(db.reminders[instance].reminders, reminder)
-	else
-		insert(db.reminders[instance][encounter].reminders, reminder)
-	end
+	Reminders:AddReminder(reminder)
 	
 	options.args[info[1]].args[info[2]].args[name] = create_tab_content_reminder(reminder)
+	Config.redraw()
 
 	return reminder;
 end
 
-
+-- /run LibDeflate = LibStub:GetLibrary("LibDeflate"); 
+-- /dump LibDeflate:DecompressDeflate(LibDeflate:DecodeForPrint("lXItjrIdvCIPKgiwaXa"))
+-- /dump LibDeflate:EncodeForPrint(LibDeflate:CompressDeflate("abcdef"))
+-- /dump LibDeflate:CompressDeflate("abc")
+-- /dump LibDeflate:DecodeForPrint("lXItjXItba")
 -- /run print(Reminders.Config.options.args["Tomb of Sargeras"].args["Kil'jaeden"])
 local function filter_results(info, base_table, search)
 	local config_tab = options.args[info[1]].args[info[2]]
@@ -800,9 +872,14 @@ local function create_tab_content(base_table)
 		general = {
 			type = "group",
 			childGroups = "tab",
-			name = "|TInterface\\Icons\\Spell_chargepositive:16|t|cff00ff00Create New",
+			name = "|TInterface\\Icons\\Spell_chargepositive:16|t|cff00ff00New / Control (" .. tostring(#base_table.reminders) .. ")|r",
 			order = 0,
 			args = {
+				createtext = {
+					type = "header",
+					name = "Create",
+					order = 0.1,
+				},
 				toggle = {
 					type = "input",
 					name = "Name",
@@ -813,7 +890,7 @@ local function create_tab_content(base_table)
 				padding0 = make_padding(2, "normal"),
 				ortext = {
 					type = "header",
-					name = "OR",
+					name = "Import",
 					order = 2.5
 				},
 				import = {
@@ -822,9 +899,41 @@ local function create_tab_content(base_table)
 					func = function() Reminders:ImportFromString() end,
 					order = 3,
 				},
-				header = {
+				sharetext = {
 					type = "header",
-					name = "",
+					name = "Share",
+					order = 3.1
+				},
+				-- send_all_name = {
+				-- 	type = "execute",
+				-- 	name = "Send All to Name",
+				-- 	order = 3.2,
+				-- 	func = function(info) end
+				-- },
+				-- padding01 = make_padding(3.21, "normal"),
+				-- padding02 = make_padding(3.22, "normal"),
+				-- padding03 = make_padding(3.23, "normal"),
+				send_all_target = {
+					type = "execute",
+					name = "Send All to Target",
+					order = 3.3,
+					func = function(info) Reminders:SendAllRemindersToTarget(info[1], info[2]) end
+				},
+				padding011 = make_padding(3.31, "normal"),
+				padding021 = make_padding(3.32, "normal"),
+				padding031 = make_padding(3.33, "normal"),
+				-- Méères Mêêres
+				send_all_hardcoded = {
+					type = "execute",
+					name = "Send All to Meeres",
+					order = 3.4,
+					
+					func = function(info) Reminders:SendAllRemindersToName(info[1], info[2], "Nnoggiedk") end -- "Méères", "Mêêres", "Meeresm"
+					-- func = function(info) Reminders:SendAllRemindersToOneOfNamesInGuild(info[1], info[2], {"Nnoggiedk"}) end -- "Méères", "Mêêres", "Meeresm"
+				},
+				searchtext = {
+					type = "header",
+					name = "Search",
 					order = 3.5
 				},
 				-- padding1 = make_padding(3.5, "normal"),
@@ -857,13 +966,13 @@ local function create_tab_content(base_table)
 					type = "execute",
 					confirm = true,
 					confirmText = "Are you sure?",
-					name = "Delete all reminders for this boss",
+					name = "Delete All Reminders For This Boss",
 					func = function(info) Reminders:PurgeBossReminders(info[1], info[2]) end,
 					order = 12
 				},
 				export_all = {
 					type = "execute",
-					name = "Export all reminders",
+					name = "Export All Reminders",
 					order = 11,
 					func = function(info) Reminders:ExportAllBossReminders(info[1], info[2]) end,
 				},
@@ -1028,6 +1137,12 @@ function Config:Open()
 		--AceRegistry:NotifyChange(addon_name_ref)
 	end
 
+end
+
+function Config:IsOpen()
+	if( not registered ) then return false end
+	AceDialog = AceDialog or LibStub("AceConfigDialog-3.0")
+	return AceDialog.OpenFrames[addon_name_ref] ~= nil
 end
 
 function Config:Hide()

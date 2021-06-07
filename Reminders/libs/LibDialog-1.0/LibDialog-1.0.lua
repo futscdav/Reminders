@@ -8,6 +8,8 @@
 -----------------------------------------------------------------------
 -- Upvalued Lua API.
 -----------------------------------------------------------------------
+local _G = getfenv(0)
+
 -- Functions
 local error = _G.error
 local pairs = _G.pairs
@@ -115,11 +117,13 @@ local active_dialogs = lib.active_dialogs
 local active_buttons = lib.active_buttons
 local active_checkboxes = lib.active_checkboxes
 local active_editboxes = lib.active_editboxes
+local active_icons = lib.active_icons
 
 local dialog_heap = lib.dialog_heap
 local button_heap = lib.button_heap
 local checkbox_heap = lib.checkbox_heap
 local editbox_heap = lib.editbox_heap
+local icon_heap = lib.icon_heap
 
 -----------------------------------------------------------------------
 -- Helper functions.
@@ -233,7 +237,7 @@ local function _Dialog_OnShow(dialog)
         return
     end
 
-    _G.PlaySound(SOUNDKIT.IG_MAINMENU_OPEN, "Master")
+    _G.PlaySound(850) -- "igMainMenuOpen"
 
     if delegate.on_show then
         delegate.on_show(dialog, dialog.data)
@@ -241,23 +245,23 @@ local function _Dialog_OnShow(dialog)
 end
 
 local function _Dialog_OnHide(dialog)
-    _G.PlaySound(SOUNDKIT.IG_MAINMENU_CLOSE, "Master")
+    local delegate = dialog.delegate
+
+    _G.PlaySound(851) -- "igMainMenuClose"
 
     -- Required so lib:ActiveDialog() will return false if called from code which is called from the delegate's on_hide
     _RecycleWidget(dialog, active_dialogs, dialog_heap)
 
-    local delegate = dialog.delegate
     if delegate.on_hide then
         delegate.on_hide(dialog, dialog.data)
     end
-
     _ReleaseDialog(dialog)
 
     if #delegate_queue > 0 then
         local delegate
         repeat
             delegate = _ProcessQueue()
-        until not delegate
+            until not delegate
     end
 end
 
@@ -891,7 +895,10 @@ end
 function dialog_prototype:Reset()
     self:SetWidth(DEFAULT_DIALOG_WIDTH)
     self:SetHeight(DEFAULT_DIALOG_HEIGHT)
+
+    Mixin(self, BackdropTemplateMixin)
     self:SetBackdrop(DEFAULT_DIALOG_BACKDROP)
+    -- self:SetBackdrop(DEFAULT_DIALOG_BACKDROP)
 
     self:SetToplevel(true)
     self:EnableKeyboard(true)

@@ -4,11 +4,13 @@ _G["Reminders"] = Reminders;
 
 local addon = "Reminders";
 local addonPrefix = "MTHDRMDRS_PR"
+local addonPrefixPre = "MTHDRMDRS_PRE"
+local addonPrefixPost = "MTHDRMDRS_PST"
 -- bit of a hack, do not use $ or § in reminder messages, please, there is no escape sequence
 local sep = "$"
 local multilinesep = "§"
 local numel = table.getn;
-local VERSION = "1.3"
+local VERSION = "1.7" -- Shadowlands
 local versionRetTable = {}
 
 local loaded = {}
@@ -20,6 +22,8 @@ local activeEncounterReminders = nil -- active timers
 
 local AceSerializer, AceComm
 local Dialog = LibStub("LibDialog-1.0")
+local LibDeflate = LibStub:GetLibrary("LibDeflate")
+local LibCompress = LibStub:GetLibrary("LibCompress")
 
 SLASH_METHODREMINDERS1 = "/rm";
 
@@ -99,23 +103,25 @@ function SlashCmdList.METHODREMINDERS(cmd, editbox)
 				Reminders:ZoneChanged(function() return _, _, "Mythic", _, _, _, _, tonumber(cmdparse[3]) end)
 			end
 		end
-		if cmdparse[1] == 'e' or cmdparse[2] == 'encounter' then
+		if cmdparse[1] == 'e' or cmdparse[1] == 'encounter' then
 			if numel(cmdparse) < 2 then print("Give more args") return end
 			if cmdparse[2] == 'u' or cmdparse[2] == 'unload' then
-				Reminders:EncounterEnd(Reminders.debug_encounter, Reminders.debug_encounter_name, "Mythic", 20, false)
+				Reminders:EncounterEnd(Reminders.debug_encounter, Reminders.debug_encounter_name, 16, 20, false) -- 16 is MYTHIC
 			end
 			if cmdparse[2] == 'l' or cmdparse[2] == 'load' then
 				if numel(cmdparse) < 3 then print("Give more args") return end
 				Reminders.debug_encounter = tonumber(cmdparse[3])
 				Reminders.debug_encounter_name = "Dummy"
-				Reminders:EncounterStart(Reminders.debug_encounter, Reminders.debug_encounter_name, "Mythic", 20)
+				Reminders:EncounterStart(Reminders.debug_encounter, Reminders.debug_encounter_name, 16, 20)
 			end
 		end
 	end
 end
 
 function Reminders.debug(...)
-	-- print(...)
+	if RemindersEnableDebug then
+		print(...)
+	end
 end
 
 do
@@ -293,10 +299,11 @@ function Reminders:OnLoad()
 	end
 
 	local success = AceComm:RegisterComm(addonPrefix, function(prefix, message, distribution, sender) self:OnMessageReceived(message, distribution, sender) end) --RegisterAddonMessagePrefix(addonPrefix)
-	if not success then
+	local success_pre = AceComm:RegisterComm(addonPrefixPre, function(prefix, message, distribution, sender) self:OnMessagePreReceived(message, distribution, sender) end)
+	local success_post = AceComm:RegisterComm(addonPrefixPost, function(prefix, message, distribution, sender) self:OnMessagePostReceived(message, distribution, sender) end)
+	if not success or not success_pre or not success_post then
 		--print("REMINDERS ERROR - FAILED TO REGISTER MESSAGE PREFIX")
 	end
-
 	self:RegisterBigWigsTimer()
 
 end
@@ -409,6 +416,7 @@ function Reminders:ShowInterface()
 end
 
 function Reminders:CLEU(timestamp, event, ...)
+	-- print(event, ...)
 	if self.eventMap[event] then
 		for i = 1, #self.eventMap[event] do
 			local reminder = self.eventMap[event][i]
@@ -491,7 +499,7 @@ end
 
 function Reminders:EncounterStart(id, name, difficulty, raidsize)
 	if not self.instance_loaded then
-		--print("Encounter", id, "started, but no instance is loaded.")
+		Reminders.debug("Encounter", id, "started, but no instance is loaded.")
 		return
 	end
 	self.encounter_loaded = name
@@ -575,6 +583,7 @@ function Reminders:GetRemindersForEncounter(instance_key_name, encounter_id)
 		-- find the right encounter (TODO: can be done by indexing)
 		if v.engage_id == encounter_id then
 			local instance = instances[instance_key_name].name
+			Reminders.debug("Found", #self.db.reminders[instance][v.name].reminders, "reminders..")
 			return self.db.reminders[instance][v.name].reminders
 		end
 	end
@@ -682,7 +691,8 @@ function Reminders:DifficultyStringToId(string)
 		return 16
 	elseif string == "HEROIC" then 
 		return 15
-	else 
+	else
+		error(string .. " represents no known difficulty")
 		return 1/0 -- error
 	end
 end
@@ -692,7 +702,7 @@ function Reminders:ReminderToString(reminder)
 end
 
 function Reminders:FireModuleEvent(event)
-	--print("Module event was fired: " .. event)
+	-- This was here for possible submodules implementation, but was never needed.
 end
 
 function Reminders:RegisterReminder(reminder)
@@ -865,7 +875,9 @@ function Reminders:PurgeBossReminders(instance, encounter)
 	end
 	if self.Config.redraw then
 		self.Config.redraw()
-		self.Config:Open()
+		if self.Config:IsOpen() then
+			self.Config:Open()
+		end
 	end
 end
 
@@ -1080,6 +1092,43 @@ function Reminders:FireReminderReal(reminder)
 			end
 		end
 	end
+	if reminder.notification.who == "echointernal" then
+
+		if EchoInternal == nil then print("Reminders: EchoInternal not found."); return end
+		for i = 1, 40 do
+
+			local aura_check_ok = true;
+			if reminder.notification.check_for_aura then
+				if TrueUnitAura('raid'..i, reminder.notification.aura_to_check) == nil then
+					-- continue to next
+					aura_check_ok = false;
+				end
+			end
+			
+			if aura_check_ok then
+				if reminder.notification.echointernal.melee and EchoInternal:IsMelee('raid'..i, false) then
+					Reminders:SendAlert(reminder, "WHISPER", UnitName('raid'..i));
+				end
+				if reminder.notification.echointernal.ranged and EchoInternal:IsRanged('raid'..i, false) then
+					Reminders:SendAlert(reminder, "WHISPER", UnitName('raid'..i));
+				end
+				if reminder.notification.echointernal.tanks and EchoInternal:IsTank('raid'..i) then
+					Reminders:SendAlert(reminder, "WHISPER", UnitName('raid'..i));
+				end
+				if reminder.notification.echointernal.healers and EchoInternal:IsHealer('raid'..i) then
+					Reminders:SendAlert(reminder, "WHISPER", UnitName('raid'..i));
+				end
+			end
+		end
+	end
+end
+
+function Reminders:OnMessagePreReceived(msg, channel, source)
+	print("|cff00ff00Reminders|r: Receiving reminders from|cff0088ff", source, "|r- please wait until finished.");
+end
+
+function Reminders:OnMessagePostReceived(msg, channel, source)
+	print("|cff00ff00Reminders|r: Reminders transfer to|cff0088ff", source, "|rcompleted.")
 end
 
 function Reminders:OnMessageReceived(msg, channel, source)
@@ -1102,7 +1151,20 @@ function Reminders:OnMessageReceived(msg, channel, source)
 		self:ReceiveAlert(reminder)
 	elseif sig == "REMINDER" then
 		local serialized = string.sub(msg, string.len("REMINDER") + string.len(sep) + 1)
+		serialized = LibDeflate:DecompressDeflate(LibDeflate:DecodeForWoWAddonChannel(serialized))
+		if not serialized then print("ERROR DECODING REMINDERS") end
 		self:ReceiveReminder(serialized)
+		print("|cff00ff00Reminders|r: Reminders received successfully.")
+	elseif sig == "REMINDER_WD" then
+		local instance = spl[2]
+		local boss = spl[3]
+		local offset = string.len("REMINDER_WD") + string.len(instance) + string.len(boss) + 3 * string.len(sep) + 1
+		local serialized = LibDeflate:DecompressDeflate(LibDeflate:DecodeForWoWAddonChannel(string.sub(msg, offset)))
+		if not serialized then print("ERROR DECODING REMINDERS") end
+		self:PurgeBossReminders(instance, boss)
+		self:ReceiveReminder(serialized)
+		print("|cff00ff00Reminders|r: Reminders received successfully.")
+		SendAddonMessageWrap(addonPrefixPost, "done", "WHISPER", source)
 	elseif sig == "VERSCHECK" then
 		local vers = "VERSCHECKRET" .. sep .. VERSION
 		SendAddonMessageWrap(addonPrefix, vers, "WHISPER", source)
@@ -1163,7 +1225,7 @@ function Reminders:VersionCheck()
 	C_Timer.After(1.5, function() Reminders:VersCheckOutput() end)
 end
 
--- SENDING HERE
+-- Now only used for exporting to string, otherwise reminders are deflated
 function Reminders:SerializeReminder(reminder)
 	AceSerializer = AceSerializer or LibStub:GetLibrary("AceSerializer-3.0")
 	if not AceSerializer then
@@ -1171,9 +1233,52 @@ function Reminders:SerializeReminder(reminder)
 		return
 	end
 	local serializedString = AceSerializer:Serialize(reminder)
-	--print(string.len(serializedString))
 	serializedString = "REMINDER" .. sep .. serializedString
 	return serializedString
+end
+
+function Reminders:SendReminder(reminder, channel, ...)
+	AceSerializer = AceSerializer or LibStub:GetLibrary("AceSerializer-3.0")
+	if not AceSerializer then
+		print("AceSerializer is not installed")
+		return
+	end
+	local serializedString = AceSerializer:Serialize(reminder)
+	serializedString = "REMINDER" .. sep .. LibDeflate:EncodeForWoWAddonChannel(LibDeflate:CompressDeflate(serializedString))
+
+	SendAddonMessageWrap(addonPrefixPre, "dummy", channel, ...)
+	SendAddonMessageWrap(addonPrefix, serializedString, channel, ...)
+end
+
+function Reminders:SendAllReminders(instance, boss, with_delete, channel, ...)
+	local to_send = RemindersDB.reminders[instance][boss].reminders;
+	print("|cff00ff00Reminders|r: Sending "..instance.. " - "..boss.." ("..tostring(#to_send) ..") reminders via "..channel..".");
+	SendAddonMessageWrap(addonPrefixPre, "dummy", channel, ...)
+
+	AceSerializer = AceSerializer or LibStub:GetLibrary("AceSerializer-3.0")
+	if not AceSerializer then
+		print("AceSerializer is not installed")
+		return
+	end
+
+	local serializedString = ""
+	if with_delete then
+		serializedString = serializedString .. "REMINDER_WD" .. sep .. instance .. sep .. boss .. sep
+	else
+		serializedString = serializedString .. "REMINDER" .. sep
+	end
+	local first = true;
+	local encode = "";
+	for i = 1, #to_send do
+		if not first then
+			encode = encode .. multilinesep;
+		end
+		encode = encode .. AceSerializer:Serialize(to_send[i]);
+		first = false;
+	end
+	serializedString = serializedString .. LibDeflate:EncodeForWoWAddonChannel(LibDeflate:CompressDeflate(encode));
+
+	SendAddonMessageWrap(addonPrefix, serializedString, channel, ...)
 end
 
 function Reminders:SendReminderToTarget(reminder)
@@ -1182,14 +1287,46 @@ function Reminders:SendReminderToTarget(reminder)
 		print("No target selected.")
 		return
 	end
-	print("Sending to " .. target)
-	local serializedString = self:SerializeReminder(reminder)
-	SendAddonMessageWrap(addonPrefix, serializedString, "WHISPER", target)
+	print("Sending reminder to " .. target)
+	self:SendReminder(reminder, "WHISPER", target)
 end
 
-function Reminders:SendReminder(reminder, channel)
-	-- NYI
-	print("Unused function..")
+function Reminders:SendAllRemindersToTarget(instance, boss, with_delete)
+	with_delete = with_delete or true
+	local target = UnitName('target')
+	if not target then 
+		print("No target selected.")
+		return
+	end
+	self:SendAllReminders(instance, boss, with_delete, "WHISPER", target)
+end
+
+function Reminders:SendAllRemindersToName(instance, boss, name, with_delete)
+	with_delete = with_delete or true
+	self:SendAllReminders(instance, boss, with_delete, "WHISPER", name)
+end
+
+function Reminders:SendReminderToName(reminder, name)
+	self:SendReminder(reminder, "WHISPER", name)
+end
+
+function Reminders:SendAllRemindersToOneOfNamesInGuild(instance, boss, list_of_names, with_delete)
+	with_delete = with_delete or true
+	local num_guild_chars, online_max, _ = GetNumGuildMembers();
+	for i = 1, num_guild_chars do
+		local full_name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i);
+		if online then
+			local without_server = Ambiguate(full_name, "guild");
+			for _, v in pairs(list_of_names) do
+				if v == without_server then
+					print("Reminders: Found|cff00ff00", v, "|r== sending all reminders for|cffffff00", boss, "|r")
+					self:SendAllReminders(instance, boss, with_delete, "WHISPER", v);
+					return
+				end
+			end
+		end
+	end
+	print("Reminders: Name not found!")
 end
 
 function Reminders:FindCategoryForSubcategory(subcategory)
@@ -1202,6 +1339,10 @@ function Reminders:FindCategoryForSubcategory(subcategory)
 	end
 	print("Encounter name of reminder import is wrong, raid for", subcategory, "not found.")
 	return nil, nil
+end
+
+function Reminders:ReceiveUpdatedRemindersForBoss(serializedString)
+	-- First delete all reminders for this boss
 end
 
 function Reminders:ReceiveReminder(serializedString)
@@ -1236,7 +1377,9 @@ function Reminders:ReceiveReminder(serializedString)
 	-- redraw config if it was loaded already
 	if self.Config.redraw then
 		self.Config.redraw()
-		self.Config:Open()
+		if self.Config:IsOpen() then
+			self.Config:Open()
+		end
 	end
 	-- load if necessary
 	if self:ShouldLoad(reminder) then
@@ -1305,11 +1448,11 @@ function Reminders:AddOrOverwrite(table, reminder)
 		end
 	end
 	if not exists then
-		print("Adding a new reminder -", reminder.name, "(", reminder.subcategory, ")")
+		Reminders.debug("Adding a new reminder -", reminder.name, "(", reminder.subcategory, ")")
 		table[#table + 1] = reminder
 	else
 		self:UnregisterReminder(table[index])
-		print("Overwriting an existing reminder -", reminder.name, "(", reminder.subcategory, ")")
+		Reminders.debug("Overwriting an existing reminder -", reminder.name, "(", reminder.subcategory, ")")
 		table[index] = reminder
 	end
 end
@@ -1399,7 +1542,15 @@ function Reminders:ImportFromString()
 			{ text = "Close", },
 			{ text = "Import", 
 
-			  on_click = function(self, mouseButton, down) Reminders:ReceiveReminder(self.editboxes[1]:GetText()); end,
+			  on_click = function(self, mouseButton, down)
+				local decoded = LibDeflate:DecodeForPrint(self.editboxes[1]:GetText());
+				-- Zlib is used because its the only compression that I found to have compatible algorithm implementations in Lua and javascript
+				local str = LibDeflate:DecompressZlib(decoded);
+				if str == nil then
+					print("Error decompression");
+				end
+				Reminders:ReceiveReminder(str); 
+			  end,
 			},
 		},	
 		show_while_dead = true,
@@ -1443,6 +1594,39 @@ function Reminders:TriggerDuplicateDialog(reminder)
 		Dialog:Dismiss("RemindersDuplicate")
 	end
 	Dialog:Spawn("RemindersDuplicate", {})
+end
+
+function Reminders:CopyNames()
+	Dialog:Register("RemindersCopy", {
+		text = "",
+		width = 500,
+		editboxes = {
+			{ width = 484,
+				on_escape_pressed = function(self, data) self:GetParent():Hide() end,
+			},
+		},
+		on_show = function(self, data)
+			local namestring = ""
+			for i = 1, 20 do
+				local name = UnitName('raid'..i);
+				if name then
+					namestring = namestring .. name .. "\n"
+				end
+			end
+			self.editboxes[1]:SetText(namestring)
+			self.editboxes[1]:HighlightText()
+			self.editboxes[1]:SetFocus()
+		end,
+		buttons = {
+			{ text = "Close", },
+		},	
+		show_while_dead = true,
+		hide_on_escape = true,
+	})
+	if Dialog:ActiveDialog("RemindersCopy") then
+		Dialog:Dismiss("RemindersCopy")
+	end
+	Dialog:Spawn("RemindersCopy", {})
 end
 
 function Reminders:TriggerRenameDialog(reminder)
