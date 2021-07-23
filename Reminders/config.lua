@@ -925,11 +925,18 @@ local function create_tab_content(base_table)
 				-- Méères Mêêres
 				send_all_hardcoded = {
 					type = "execute",
-					name = "Send All to Meeres",
+					name = "Send All to:",
 					order = 3.4,
 					
-					func = function(info) Reminders:SendAllRemindersToName(info[1], info[2], "Nnoggiedk") end -- "Méères", "Mêêres", "Meeresm"
+					func = function(info) Reminders:SendAllRemindersToName(info[1], info[2], RemindersDB.misc_data._send_name_arg) end -- "Méères", "Mêêres", "Meeresm"
 					-- func = function(info) Reminders:SendAllRemindersToOneOfNamesInGuild(info[1], info[2], {"Nnoggiedk"}) end -- "Méères", "Mêêres", "Meeresm"
+				},
+				send_all_hardcoded_name = {
+					type = "input",
+					name = "Name",
+					get = function(info) return RemindersDB.misc_data._send_name_arg or "" end,
+					set = function(info, value) RemindersDB.misc_data._send_name_arg = value end,
+					order = 3.45
 				},
 				searchtext = {
 					type = "header",

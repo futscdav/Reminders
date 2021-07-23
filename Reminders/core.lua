@@ -25,6 +25,8 @@ local Dialog = LibStub("LibDialog-1.0")
 local LibDeflate = LibStub:GetLibrary("LibDeflate")
 local LibCompress = LibStub:GetLibrary("LibCompress")
 
+local hack__max_engage_delay = 2
+
 SLASH_METHODREMINDERS1 = "/rm";
 
 local function strwssplit(str)
@@ -159,8 +161,6 @@ do
 				Reminders:OnLoad();
 			end
 		else
-			-- do some on event handling here
-			-- print(...)
 			Reminders:OnEvent(...);
 		end
 	end)
@@ -173,22 +173,42 @@ local RegisterBigWigs, BigWigsResetLocals, savedPhase
 do
 	local registered = false
 	savedPhase = 0
+
+	-- New Messages
 	function RegisterBigWigs()
-		if registered then
-			return
-		end
+		if registered then return end
 		if (BigWigsLoader) and BigWigsLoader.RegisterMessage then
-			local aux = {}
-			function aux:BigWigs_Message (event, module, key, text, ...)
-				if (key == "stages") then
-					savedPhase = savedPhase or 0
-					savedPhase = savedPhase + 1
-					Reminders:BossPhased(savedPhase)
-				end
+
+			Reminders.BigWigs_Stage = function(event, boss, stage)
+				savedPhase = savedPhase or 0
+				savedPhase = savedPhase + 1
+				
+				Reminders.bw_last_stage_call = GetTime();
+				Reminders.bw_last_stage_call_args = { event, boss, stage };
+				
+				Reminders.debug("Reminders: Phasing into "..savedPhase)
+				Reminders:BossPhased(savedPhase)
 			end
-			BigWigsLoader.RegisterMessage(aux, "BigWigs_Message")
+
+			BigWigsLoader.RegisterMessage(Reminders, "BigWigs_SetStage", Reminders.BigWigs_Stage);
+			BigWigsLoader.RegisterMessage(Reminders, "BigWigs_OnBossEngage", function(event, boss, difficulty)
+				-- This triggers whenever BigWigs gets ECOUNTER_START, however, it's only sent after the boss
+				-- received OnEngage. The timing trick is a disgusting hack.
+				Reminders.bw_last_engage_call = GetTime();
+				Reminders.bw_last_engage_id = boss.engageId;
+
+				-- Reminders ENCOUNTER_START was not yet triggered (which means reminders were not loaded etc)
+				if not Reminders.encounter_start_last_call or (Reminders.bw_last_engage_call - Reminders.encounter_start_last_call) > hack__max_engage_delay then
+					-- Phase was sent (which is sent pre-pull)
+					Reminders.bw_last_stage_call = Reminders.bw_last_stage_call or 0
+					Reminders.bw_trigger_stage_manual = (Reminders.bw_last_engage_call - Reminders.bw_last_stage_call) < hack__max_engage_delay;
+				else
+					Reminders.bw_trigger_stage_manual = false
+				end
+			end);
+
 			registered = true
-		end  
+		end
 	end
 	function BigWigsResetLocals()
 		savedPhase = 0
@@ -268,13 +288,9 @@ function Reminders:CheckForNewInstances()
 	end
 end
 
-function Reminders:OnLoad()
-	self.event_frame:UnregisterEvent("ADDON_LOADED");
-	self.loaded = loaded
-	self.instance_loaded = nil
-	RemindersDB = RemindersDB or self:InitDB();
-	Reminders.db = RemindersDB
+function Reminders:DelayedOnLoad()
 
+	self.instances = Reminders:PopulateInstances()
 	self:CheckForNewInstances();
 
 	RegisterBigWigs()
@@ -305,11 +321,21 @@ function Reminders:OnLoad()
 		--print("REMINDERS ERROR - FAILED TO REGISTER MESSAGE PREFIX")
 	end
 	self:RegisterBigWigsTimer()
-
+	self.init_finished = true
 end
 
-function Reminders:abc()
-	print(savedPhase)
+function Reminders:OnLoad()
+	self.event_frame:UnregisterEvent("ADDON_LOADED");
+	self.loaded = loaded
+	self.instance_loaded = nil
+	RemindersDB = RemindersDB or self:InitDB();
+	Reminders.db = RemindersDB
+	RemindersDB.misc_data = RemindersDB.misc_data or {}
+
+	-- Seems like some functions are not actually available during addon onload event
+	-- So delay sensitive init for 0.5 second afterwards. This will be called at earliest
+	-- 1 full frame later, which should be enough.
+	C_Timer.After(0.5, function() Reminders:DelayedOnLoad() end)
 end
 
 function Reminders:Purge()
@@ -428,6 +454,8 @@ function Reminders:CLEU(timestamp, event, ...)
 end
 
 function Reminders:OnEvent(...)
+	if not self.init_finished then return end
+	
 	local game_event = ...; --, timestamp, event = ...;
 	if game_event == "COMBAT_LOG_EVENT_UNFILTERED" then
 		local payload = {CombatLogGetCurrentEventInfo()}
@@ -504,13 +532,19 @@ function Reminders:EncounterStart(id, name, difficulty, raidsize)
 	end
 	self.encounter_loaded = name
 	self:LoadEncounterReminders(id, difficulty)
+	
+	-- Currently this heavily depends on Reminders ENCOUNTER_START being called
+	-- before BigWigs ENCOUNTER_START, but I'm not sure I can guarantee that!
+
+	-- If BigWigs triggers first and sets SetStage, then I need to retrigger that
+	-- after all reminders are loaded!
 	BigWigsResetLocals()
 
+	self.encounter_start_last_call = GetTime();
+	
 	self.active_encounter = id
 	self.active_difficulty = difficulty
-
-	-- due to "pretty names", this is no longer reliable
-	-- self:BossPhased(1)
+	
 	-- manually call all encounter start reminders
 	local event = "ENCOUNTER_START"
 	if self.eventMap[event] then
@@ -522,13 +556,11 @@ function Reminders:EncounterStart(id, name, difficulty, raidsize)
 		end
 	end
 
-	-- due to bigwigs changes, hardcode that kj is shifted 1 phase forward
-	if id == 2051 then
-		Reminders.debug("This is a special boss, manually triggering 1st phase.");
-		savedPhase = 1
-		Reminders:BossPhased(savedPhase)
+	if self.bw_trigger_stage_manual then
+		Reminders.debug("Trigger Manual Phasing.")
+		self.BigWigs_Stage(unpack(self.bw_last_stage_call_args))
+		self.bw_trigger_stage_manual = false;
 	end
-
 
 end
 
@@ -542,6 +574,8 @@ function Reminders:EncounterEnd(id, name, difficulty, raidsize, kill)
 	self.active_encounter = nil
 	self.active_difficulty = nil
 	self.active_phase = nil
+
+	self.encounter_start_last_call = nil
 
 	self:UnloadEncounterReminders(id, difficulty)
 	BigWigsResetLocals()
@@ -1250,9 +1284,21 @@ function Reminders:SendReminder(reminder, channel, ...)
 	SendAddonMessageWrap(addonPrefix, serializedString, channel, ...)
 end
 
+local function tab2str(t)
+	local r = nil
+	for k, v in pairs(t) do
+		if r == nil then
+			r = tostring(v)
+		else
+			r = r .. ", " .. tostring(v)
+		end
+	end
+	return r
+end
+
 function Reminders:SendAllReminders(instance, boss, with_delete, channel, ...)
 	local to_send = RemindersDB.reminders[instance][boss].reminders;
-	print("|cff00ff00Reminders|r: Sending "..instance.. " - "..boss.." ("..tostring(#to_send) ..") reminders via "..channel..".");
+	print("|cff00ff00Reminders|r: Sending "..instance.. " - "..boss.." ("..tostring(#to_send) ..") reminders via "..channel.." (".. tab2str({ ... }) ..").");
 	SendAddonMessageWrap(addonPrefixPre, "dummy", channel, ...)
 
 	AceSerializer = AceSerializer or LibStub:GetLibrary("AceSerializer-3.0")
@@ -1341,26 +1387,13 @@ function Reminders:FindCategoryForSubcategory(subcategory)
 	return nil, nil
 end
 
-function Reminders:ReceiveUpdatedRemindersForBoss(serializedString)
-	-- First delete all reminders for this boss
-end
-
-function Reminders:ReceiveReminder(serializedString)
-	-- split multiline for multiimport
-	if string.find(serializedString, multilinesep) then
-		--print("Splitting reminders")
-		local splits = split(serializedString, multilinesep)
-		for k, spl in pairs(splits) do
-			self:ReceiveReminder(spl)
-		end
-		return
-	end
+function Reminders:ReceiveReminderSingle(serialized, purge_category)
 	AceSerializer = AceSerializer or LibStub:GetLibrary("AceSerializer-3.0")
 	if not AceSerializer then
 		print("AceSerializer is not installed")
 		return
 	end
-	local success, reminder = AceSerializer:Deserialize(serializedString)
+	local success, reminder = AceSerializer:Deserialize(serialized)
 	if not success then
 		print(reminder)
 		return
@@ -1371,19 +1404,41 @@ function Reminders:ReceiveReminder(serializedString)
 		reminder.category, reminder.subcategory = self:FindCategoryForSubcategory(reminder.subcategory)
 		if reminder.category == nil then return end
 	end
+	if purge_category then
+		self:PurgeBossReminders(reminder.category, reminder.subcategory)
+	end
 
 	-- insert it into db
 	self:AddReminder(reminder)
+	-- load if necessary
+	if self:ShouldLoad(reminder) then
+		self:RegisterReminder(reminder)
+	end
+end
+
+function Reminders:ReceiveReminder(serializedString, purge_category, redraw)
+	-- split multiline for multiimport
+	if string.find(serializedString, multilinesep) then
+		local yield_counter = 0;
+		local splits = split(serializedString, multilinesep)
+		for k, spl in pairs(splits) do
+			self:ReceiveReminderSingle(spl, purge_category, redraw)
+			purge_category = false
+			if coroutine.running() and (yield_counter % 10) == 0 then
+				coroutine.yield();
+			end
+			yield_counter = yield_counter + 1;
+		end
+	else
+		Reminders:ReceiveReminderSingle(serializedString, purge_category)
+	end
+
 	-- redraw config if it was loaded already
 	if self.Config.redraw then
 		self.Config.redraw()
 		if self.Config:IsOpen() then
 			self.Config:Open()
 		end
-	end
-	-- load if necessary
-	if self:ShouldLoad(reminder) then
-		self:RegisterReminder(reminder)
 	end
 end
 
@@ -1406,12 +1461,189 @@ function Reminders:ReceiveAlert(reminder)
 	end
 end
 
+local function trim(s)
+    return (s:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+local function trim_split(haystack, token, dotrim)
+    token = token or ","
+    dotrim = dotrim or true
+    
+    if token == "/" then
+        token = "\\/"
+    end
+    
+    local t = {}
+    for word in string.gmatch(haystack, '([^' .. token .. ']+)') do
+        if dotrim then
+            table.insert(t, trim(word))
+        else
+            table.insert(t, word)
+        end
+    end 
+    return t
+end
+
+local template_replace = {
+	["star"] 		= "|T137001:0|t",
+    ["orange"] 		= "|T137002:0|t",
+    ["diamond"] 	= "|T137003:0|t",
+    ["triangle"] 	= "|T137004:0|t",
+    ["moon"] 		= "|T137005:0|t",
+    ["square"] 		= "|T137006:0|t",
+    ["cross"] 		= "|T137007:0|t",
+    ["skull"] 		= "|T137008:0|t",
+    
+    -- Marker: Color
+    ["yellow"] 	= "|T137001:0|t",
+    ["orange"] 	= "|T137002:0|t",
+    ["purple"] 	= "|T137003:0|t",
+    ["green"] 	= "|T137004:0|t",
+    ["white"] 	= "|T137005:0|t",
+    ["blue"] 	= "|T137006:0|t",
+    ["red"] 	= "|T137007:0|t",
+    ["bone"] 	= "|T137008:0|t",
+    
+    -- Marker Index
+    ["rt1"] = "|T137001:0|t",
+    ["rt2"] = "|T137002:0|t",
+    ["rt3"] = "|T137003:0|t",
+    ["rt4"] = "|T137004:0|t",
+    ["rt5"] = "|T137005:0|t",
+    ["rt6"] = "|T137006:0|t",
+    ["rt7"] = "|T137007:0|t",
+    ["rt8"] = "|T137008:0|t",
+
+    ["spell"] = function(placeholder, spellid)
+        local name, _, icon = GetSpellInfo(spellid)
+        if name and icon then
+            return "|T" .. icon .. ":0|t " .. name
+        end
+        return placeholder
+    end,
+    
+    ["spellicon"] = function(placeholder, spellid)
+        local _, _, icon = GetSpellInfo(spellid)
+        if icon then
+            return "|T" .. icon .. ":0|t"
+        end
+        return ""
+    end,
+    
+    ["spellname"] = function(placeholder, spellid)
+        local name = GetSpellInfo(spellid)
+        return name or ""
+    end,
+
+	["icon"] = function(placeholder, id)
+		return "|T" .. id .. ":0|t"
+	end,
+};
+do 
+	template_replace.si = template_replace.spellicon
+	template_replace.sn = template_replace.spellname
+	template_replace.s = template_replace.spell
+	template_replace.i = template_replace.icon
+
+	-- DK
+	template_replace["amz"]              = function(t) return template_replace.s(t, 51052) end
+	template_replace["ams"]              = function(t) return template_replace.s(t, 48707) end
+
+	-- Paladin
+	template_replace["aura_mastery"]     = function(t) return template_replace.s(t, 31821) end
+	template_replace["wings"]            = function(t) return template_replace.s(t, 31884) end
+	template_replace["avenging_wrath"]   = function(t) return template_replace.s(t, 31884) end
+	template_replace["ashen_hallow"]     = function(t) return template_replace.s(t, 316958) end
+	template_replace["bubble"]           = function(t) return template_replace.s(t, 642) end
+
+	-- Druid
+	template_replace["tranquility"]      = function(t) return template_replace.s(t, 740) end
+	template_replace["tranq"]            = function(t) return template_replace.s(t, 740) end
+	template_replace["roar"]             = function(t) return template_replace.s(t, 106898) end
+	template_replace["massroot"]         = function(t) return template_replace.s(t, 102359) end
+
+	-- Hunter
+	template_replace["turtle"]           = function(t) return template_replace.s(t, 186265) end
+
+	-- Mage
+	template_replace["iceblock"]         = function(t) return template_replace.s(t, 45438) end
+	template_replace["ice block"]        = function(t) return template_replace.s(t, 45438) end
+	template_replace["alter_time"]       = function(t) return template_replace.s(t, 108978) end
+	
+	-- Monk
+	template_replace["revival"]          = function(t) return template_replace.s(t, 115310) end
+	
+	-- Priest
+	template_replace["mass_dispel"]      = function(t) return template_replace.s(t, 32375) end
+	template_replace["spirit_shell"]     = function(t) return template_replace.s(t, 109964) end
+	template_replace["rapture"]          = function(t) return template_replace.s(t, 47536) end
+	template_replace["barrier"]          = function(t) return template_replace.s(t, 62618) end
+	template_replace["vampic_embrace"]   = function(t) return template_replace.s(t, 15286) end
+	template_replace["ve"]               = function(t) return template_replace.s(t, 15286) end
+	template_replace["divine hymn"]      = function(t) return template_replace.s(t, 64843) end
+	template_replace["evang"]            = function(t) return template_replace.s(t, 246287) end
+	template_replace["evangelism"]       = function(t) return template_replace.s(t, 246287) end
+	template_replace["pain_supp"]        = function(t) return template_replace.s(t, 33206) end
+	template_replace["pain_suppression"] = function(t) return template_replace.s(t, 33206) end
+
+	-- Shaman
+	template_replace["tide"]             = function(t) return template_replace.s(t, 108280) end
+	template_replace["healing_tide"]     = function(t) return template_replace.s(t, 108280) end
+	template_replace["link"]             = function(t) return template_replace.s(t, 98021) end
+	template_replace["spirit_link"]      = function(t) return template_replace.s(t, 98021) end
+	template_replace["windrush"]         = function(t) return template_replace.s(t, 192077) end
+	template_replace["wind rush"]        = function(t) return template_replace.s(t, 192077) end
+
+	-- Warlock
+	template_replace["gate"]             = function(t) return template_replace.s(t, 111771) end
+
+	-- Warrior
+	template_replace["rally"]            = function(t) return template_replace.s(t, 97462) end
+	template_replace["rallying_cry"]     = function(t) return template_replace.s(t, 97462) end
+
+	-- DH
+	template_replace["darkness"]         = function(t) return template_replace.s(t, 196718) end
+
+	-- Lust
+	template_replace["bloodlust"]        = function(t) return template_replace.s(t, 2825) end
+	template_replace["lust"]             = function(t) return template_replace.s(t, 2825) end
+	-- catch anything that doesn't comply
+	setmetatable(template_replace, {["__index"] = function(t, idx) return tostring(idx) end})
+end
+
+function Reminders.EscapeReminderMessage(message)
+    local template = true
+    
+    while template do
+        template = message:match("^.*{([A-Za-z0-9-_:]+)}.*$")
+        if template then
+            local needle = "{" .. template .. "}"
+            
+            local id = 0
+            if template:find(":") then
+                local splitted = trim_split(template, ":")
+                template = splitted[1]
+                id = tonumber(splitted[2] or "0")
+            end
+            
+            local replacer = template_replace[template:lower()]
+            if type(replacer) == "function" then
+                message = message:gsub(needle, replacer(template, id))
+            else
+                message = message:gsub(needle, replacer)
+            end
+        end
+    end
+	return message
+end
+
 function Reminders:ConstructAlertMessage(reminder, optional_target)
 	local payload = reminder.notification.message
 	if optional_target then
 		-- kinda useless but maybe will find use
-		payload = reminder.notification.message:gsub("%%n", optional_target)
+		payload = payload:gsub("%%n", optional_target)
 	end
+	payload = Reminders.EscapeReminderMessage(payload)
 	local msg = "ALERT"
 	msg = msg .. sep
 	msg = msg .. payload
@@ -1524,6 +1756,19 @@ function Reminders:ExportAllBossReminders(instance, boss)
 	Dialog:Spawn("RemindersStringExportAll", {string = string})
 end
 
+local function import_click(bytes)
+	local decoded = LibDeflate:DecodeForPrint(bytes);
+	-- Zlib is used because its the only compression that I found to have compatible algorithm implementations in Lua and javascript
+	coroutine.yield();
+	local str = LibDeflate:DecompressZlib(decoded);
+	coroutine.yield();
+	if str == nil then
+		print("Error decompression");
+	end
+	Reminders:ReceiveReminder(str, true); 
+	return
+end
+
 function Reminders:ImportFromString()
 	Dialog:Register("RemindersStringImport", {
 		text = "Reminder String Import",
@@ -1542,14 +1787,14 @@ function Reminders:ImportFromString()
 			{ text = "Close", },
 			{ text = "Import", 
 
-			  on_click = function(self, mouseButton, down)
-				local decoded = LibDeflate:DecodeForPrint(self.editboxes[1]:GetText());
-				-- Zlib is used because its the only compression that I found to have compatible algorithm implementations in Lua and javascript
-				local str = LibDeflate:DecompressZlib(decoded);
-				if str == nil then
-					print("Error decompression");
-				end
-				Reminders:ReceiveReminder(str); 
+			  on_click = function(self, mousebutton, down)
+				Reminders.import_coro = coroutine.create(import_click)
+				coroutine.resume(Reminders.import_coro, self.editboxes[1]:GetText())
+				
+				Reminders.coro_ticker = Reminders.coro_ticker or C_Timer.NewTicker(
+					0.03,
+					function() coroutine.resume(Reminders.import_coro) end
+				)
 			  end,
 			},
 		},	

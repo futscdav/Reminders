@@ -171,8 +171,9 @@ function gui:LockMove()
 end
 
 function gui:ShowReminder(reminder)
+    
     -- sound is the index into the table, sadly, so make sure to convert it when sending
-    self:AddMessage(reminder.notification.message, reminder.notification.duration, reminder.notification.color or {1.0, 1.0, 1.0, 1.0})
+    self:AddMessage(Reminders.EscapeReminderMessage(reminder.notification.message), reminder.notification.duration, reminder.notification.color or {1.0, 1.0, 1.0, 1.0})
 
     if reminder.notification.sound then
         local sound_name = reminder.notification.sound

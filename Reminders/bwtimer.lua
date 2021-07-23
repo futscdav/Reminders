@@ -36,7 +36,7 @@ do
       local expirationTime = now + duration;
 
       local newBar;
-      bars[text] = bars[text] or {};
+      bars[text] = {};
       local bar = bars[text];
       bar.addon = addon;
       bar.spellId = spellId;
